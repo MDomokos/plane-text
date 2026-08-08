@@ -1,0 +1,89 @@
+# Deploy Plane Text to GitHub Pages.
+#
+# There is no build step. The site is the repo: index.html at the root, with
+# app/ and src/ beside it, every URL relative so it survives the /plane-text/
+# sub-path Pages serves from.
+#
+# What this workflow does NOT do is run `npm run precache`. That is deliberate,
+# and it mirrors the reasoning in tools/build-precache.js: a build that
+# regenerates the manifest can never tell you that someone forgot to. Instead
+# `npm test` runs, and the drift assertion fails the deploy. Stale manifest
+# means no deploy, rather than a green tick over a broken offline mode.
+
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time. Not cancel-in-progress: a half-published Pages
+# artifact is worse than a queued one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Explicit allow-list rather than uploading the repo. test/ and tools/
+      # are not part of the site and should not be fetchable.
+      #
+      # This list is hand-maintained, which is the one place this workflow can
+      # drift. Adding a new top-level file or directory that ships means adding
+      # it here.
+      - name: Assemble site
+        run: |
+          set -eu
+          mkdir -p _site
+          cp index.html manifest.webmanifest sw.js _site/
+          cp -r app src _site/
+
+          # sw.js gets its own assertion because the precache check below
+          # cannot cover it: build-precache.js deliberately EXCLUDEs sw.js from
+          # its own walk (a worker that caches itself fights the browser's
+          # update check). So a missing sw.js would pass every other gate here
+          # and publish an app that silently is not offline-capable -- the one
+          # failure this project cannot tolerate. It must also be at the root:
+          # at app/sw.js the scope excludes index.html.
+          test -f _site/sw.js || { echo "sw.js missing from site root"; exit 1; }
+          # Fail loudly if anything precached is missing from the assembled
+          # site. Catches the drift the allow-list above invites.
+          node --input-type=module -e '
+            const { PRECACHE } = await import("./app/precache-manifest.js");
+            const { existsSync } = await import("node:fs");
+            const missing = PRECACHE.filter(f => !existsSync(`_site/${f}`));
+            if (missing.length) {
+              console.error("Precached files missing from _site:", missing);
+              process.exit(1);
+            }
+            console.log(`${PRECACHE.length} precached files present.`);
+          '
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
