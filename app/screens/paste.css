@@ -1,0 +1,192 @@
+/* Plane Text: open.
+ *
+ * One primary target, one secondary row, one strip. Nothing here is gold except
+ * what the action bar puts there. The hero PASTE button is the screen's one
+ * accent, and a gold-outlined paste target above it would be two.
+ */
+
+.sc-open {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-3);
+  height: 100%;
+
+  /* No stage on this screen, so the whole root clamps. --pt-art-w carries over
+   * from whatever capture last rendered, which is what makes the two screens
+   * line up rather than each picking its own width. */
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin: 0 auto;
+}
+
+.sc-open-heading {
+  margin: 0;
+  text-align: center;
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track-wide);
+  color: var(--pt-ink-faint);
+  flex: none;
+}
+
+/* Door one: a message ------------------------------------------------------ */
+
+/* Large, because this is the target you cannot miss. It is the reason receiving
+ * stopped being a 9px hairline strip at the top of the capture screen, which
+ * nobody would have found. */
+.sc-target {
+  flex: 1 1 auto;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pt-space-3);
+
+  background: none;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-dim);
+  font-family: inherit;
+  cursor: pointer;
+  transition: box-shadow var(--pt-dur-base) ease;
+}
+.sc-target:hover { box-shadow: inset 0 0 0 1px var(--pt-line-strong); }
+
+/* An empty frame: a picture-shaped hole to put something in. The same glyph the
+ * OPEN slot carries, for the same reason. */
+.sc-target-glyph {
+  font-size: var(--pt-size-xl);
+  line-height: 1;
+  color: var(--pt-ink-faint);
+}
+
+.sc-target-lead,
+.sc-target-sub {
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track);
+  line-height: var(--pt-line-body);
+  text-align: center;
+}
+.sc-target-sub { color: var(--pt-ink-faint); }
+
+/* The fallback field ------------------------------------------------------- */
+
+/* Hidden until the clipboard route fails, so a software keyboard never appears
+ * for an action that is a paste. Monospace because what goes in it is a
+ * payload, and seeing it wrap as fixed-width columns is the first hint that
+ * half a message was pasted. */
+.sc-field {
+  flex: none;
+  min-height: 88px;
+  padding: var(--pt-space-3);
+  background: var(--pt-surface-2);
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink);
+  font-family: var(--pt-mono);
+  font-size: var(--pt-size-sm);
+  resize: none;
+}
+.sc-field[hidden] { display: none; }
+
+.sc-problem {
+  flex: none;
+  margin: 0;
+  color: var(--pt-error);
+  font-size: var(--pt-size-xs);
+  line-height: var(--pt-line-body);
+}
+.sc-problem[hidden] { display: none; }
+
+/* Door two: a photo -------------------------------------------------------- */
+
+/* Visibly secondary: same hairline, a fraction of the height. The hierarchy is
+ * honest about frequency, since receiving a message is the commoner reason to
+ * be on this screen, without hiding the other door. */
+.sc-library {
+  flex: none;
+  min-height: var(--pt-tap);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pt-space-2);
+
+  background: none;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-dim);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track);
+  cursor: pointer;
+  transition: box-shadow var(--pt-dur-base) ease;
+}
+.sc-library:hover { box-shadow: inset 0 0 0 1px var(--pt-line-strong); }
+.sc-library-glyph { font-size: var(--pt-size-md); line-height: 1; color: var(--pt-ink-faint); }
+
+/* Recents ------------------------------------------------------------------ */
+
+.sc-recent { flex: none; }
+
+.sc-recent-label {
+  margin: 0 0 var(--pt-space-2);
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track);
+  color: var(--pt-ink-faint);
+}
+
+/* Horizontal scroll rather than a wrap. A second row would start to look like
+ * the gallery this is not. */
+.sc-recent-strip {
+  display: flex;
+  gap: var(--pt-space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.sc-recent-strip::-webkit-scrollbar { display: none; }
+
+.sc-thumb {
+  flex: none;
+  width: 46px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-1);
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--pt-ink-faint);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.sc-thumb-box {
+  display: block;
+  height: 60px;
+  overflow: hidden;
+  border-radius: var(--pt-radius);
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  background: var(--pt-art-bg);
+}
+
+.sc-thumb-art {
+  margin: 0;
+  white-space: pre;
+  font-family: var(--pt-mono);
+  color: var(--pt-art-ink);
+  font-kerning: none;
+  font-variant-ligatures: none;
+}
+
+/* The name identifies, not the picture. At 46px the art is texture, and this
+ * label is how you know which one it is. */
+.sc-thumb-name {
+  font-size: 10px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -1,0 +1,54 @@
+# Generated output
+out/
+dist/
+build/
+*.pgm
+*.ppm
+*.bmp
+Test?D*.html
+test-d*.html
+
+# Source photographs. Untracked by choice
+images/
+
+# Local working notes
+.notes/
+
+# Toolchain
+node_modules/
+npm-debug.log*
+yarn-error.log
+.npm/
+.cache/
+coverage/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Worktrees and merge leftovers
+.worktrees/
+*.orig
+*.rej
+
+# Editors and OS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key

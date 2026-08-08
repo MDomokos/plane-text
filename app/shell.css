@@ -1,0 +1,171 @@
+/* Plane Text: the app frame. Header, screen container, bottom bar.
+ *
+ * Everything here matches an element the shell owns. Screens own their own
+ * insides. Nothing in this file reaches into #app-screen's children except the
+ * stub heading, which exists to be deleted.
+ */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  /* dvh so the bottom bar does not hide behind the mobile URL bar. */
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--pt-bg);
+  color: var(--pt-ink);
+  font-family: var(--pt-font);
+  font-size: var(--pt-size-md);
+  line-height: var(--pt-line-body);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;   /* no pull-to-refresh over a live viewfinder */
+}
+
+/* Header ------------------------------------------------------------------ */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: var(--pt-space-2);
+  height: calc(var(--pt-header-h) + var(--pt-safe-top));
+  padding: var(--pt-safe-top) calc(var(--pt-space-4) + var(--pt-safe-right)) 0 calc(var(--pt-space-4) + var(--pt-safe-left));
+  border-bottom: 1px solid var(--pt-line);
+  background: var(--pt-bg);
+}
+
+.app-title {
+  margin: 0;
+  font-size: var(--pt-size-md);
+  font-weight: 600;
+  line-height: var(--pt-line-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-back {
+  width: var(--pt-tap);
+  height: var(--pt-tap);
+  margin-left: calc(var(--pt-space-4) * -1);
+  border: 0;
+  border-radius: var(--pt-radius-sm);
+  background: none;
+  color: var(--pt-ink);
+  font-size: var(--pt-size-xl);
+  line-height: 1;
+  cursor: pointer;
+}
+.app-back[hidden] { display: none; }
+
+/* The offline-shell agent's slot. Right-aligned, quiet by default. */
+.app-header-slot {
+  margin-left: auto;
+  font-size: var(--pt-size-xs);
+  color: var(--pt-ink-dim);
+  font-family: var(--pt-mono);
+}
+
+/* The three picture screens have no header. Added 2026-08-09 with the action
+ * bar. This is a structural decision, not a style one.
+ *
+ * Back lives in the leftmost slot of the action bar on every screen, because
+ * one-handed use is the capture screen's top priority and the header is the
+ * worst reach on a phone. A header back button as well would be two controls
+ * for one job, in the worst and best positions.
+ *
+ * The header also carries a title, and these screens do not want one. Capture
+ * shows the style selector at the top, compose shows the message name, paste
+ * shows its own label. A persistent "Plane Text" above those costs frame height
+ * and says nothing.
+ *
+ * The settings screens keep the header. They are ordinary scrolling screens
+ * reached from a picture screen, and the header's back button is right there
+ * because their action bar has nothing else to do.
+ *
+ * This hides #app-header-slot too, so the offline readout is not visible on
+ * these routes. The version string belongs in settings, where the 2026-08-09
+ * decision's "report a version rather than a tick" reader is looking. If the
+ * offline-shell agent needs it visible everywhere, that is a design
+ * conversation rather than a CSS override. */
+body[data-route="capture"] .app-header,
+body[data-route="compose"] .app-header,
+body[data-route="paste"] .app-header { display: none; }
+
+/* And the grid has to lose a row with it.
+ *
+ * `body` is `grid-template-rows: auto 1fr auto` for header / screen / bottom.
+ * A `display: none` grid item is removed from the grid entirely, so hiding the
+ * header shifts the other two up a row: the screen inherits the `auto` track
+ * and collapses to its content height, and the bottom bar inherits the `1fr`
+ * and swallows the viewport. Measured before this rule existed: an 86px screen
+ * above a 1043px action bar.
+ *
+ * The knock-on was worse than the layout. A zero-height stage meant
+ * ResizeObserver never reported a usable box, `autoFit` never called `draw`,
+ * and the viewfinder rendered nothing at all — a blank screen from a rule about
+ * a header. */
+body[data-route="capture"],
+body[data-route="compose"],
+body[data-route="paste"] { grid-template-rows: 1fr auto; }
+
+/* Screen ------------------------------------------------------------------ */
+
+.app-screen {
+  min-height: 0;          /* lets a scrolling child actually scroll in a grid */
+  overflow-y: auto;
+  padding: var(--pt-space-4) calc(var(--pt-space-4) + var(--pt-safe-right)) var(--pt-space-4) calc(var(--pt-space-4) + var(--pt-safe-left));
+}
+
+/* The capture screen is full-bleed: the viewfinder owns the whole area.
+ * Compose is the same screen showing a still, so it gets the same treatment.
+ * Paste keeps its padding: it is a form, not a picture. */
+body[data-route="capture"] .app-screen,
+body[data-route="compose"] .app-screen { padding: 0; overflow: hidden; }
+
+.app-screen:focus { outline: none; }
+
+/* Bottom bar -------------------------------------------------------------- */
+
+.app-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pt-space-3);
+  padding: 0 calc(var(--pt-space-4) + var(--pt-safe-right)) var(--pt-safe-bottom) calc(var(--pt-space-4) + var(--pt-safe-left));
+  background: var(--pt-bg);
+}
+
+/* Empty is the default state, and it must collapse rather than leave a bar. */
+.app-bottom:not(:empty) {
+  min-height: calc(var(--pt-bottom-h) + var(--pt-safe-bottom));
+}
+
+/* No top border on the picture screens. The bar sits on the same black plane as
+ * the art above it, and a rule across the frame reads as a seam the art stops
+ * at. The settings screens scroll, so there the line marks where scrolling
+ * content ends. */
+body[data-route="settings"] .app-bottom:not(:empty),
+body[data-route^="settings/"] .app-bottom:not(:empty) {
+  border-top: 1px solid var(--pt-line);
+}
+
+/* The action bar is one child that owns the full width. See actionbar.css. */
+.app-bottom > .pt-actionbar { flex: 1; }
+
+/* Stubs ------------------------------------------------------------------- */
+
+.screen-stub {
+  margin: 0;
+  font-size: var(--pt-size-lg);
+  font-weight: 500;
+  color: var(--pt-ink-dim);
+}
+
+/* Focus, once, for everything ---------------------------------------------- */
+
+:focus-visible { outline: var(--pt-focus); outline-offset: 2px; }

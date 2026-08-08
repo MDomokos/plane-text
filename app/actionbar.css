@@ -1,0 +1,121 @@
+/* Plane Text: the action bar. See actionbar.js for the layout rules.
+ *
+ * Two things this file guards against, both from the monospace-everywhere
+ * decision in tokens.css:
+ *
+ *   Every control sets `font-family: inherit`. Form elements do not inherit
+ *   font-family from body, so without it the bar renders in the UA sans while
+ *   nothing around it does.
+ *
+ *   The hero's brackets are set at display size in an unknown monospace font.
+ *   `[` in SF Mono is thin and squared; in Roboto Mono it is heavier with
+ *   different terminals. The bar around them holds the silhouette constant,
+ *   which is why the hero is a bar with brackets inside rather than two
+ *   brackets on black. Same class of problem as the ramp calibration lesson in
+ *   README.md: a glyph measured in one font stack is not that glyph in another.
+ */
+
+.pt-actionbar {
+  display: flex;
+  align-items: stretch;
+  gap: var(--pt-space-2);
+  height: var(--pt-action-h);
+
+  /* Clamp to the picture, not the window. See --pt-art-w in tokens.css. */
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin: 0 auto;
+}
+
+/* A slot ------------------------------------------------------------------ */
+
+.pt-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pt-space-1);
+  position: relative;
+  padding: 0 var(--pt-space-2);
+
+  background: none;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-dim);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  line-height: 1;
+  letter-spacing: var(--pt-track);
+  cursor: pointer;
+  transition: box-shadow var(--pt-dur-base) ease, color var(--pt-dur-base) ease;
+}
+
+.pt-slot:hover { box-shadow: inset 0 0 0 1px var(--pt-line-strong); color: var(--pt-ink); }
+.pt-slot:active { color: var(--pt-ink); }
+
+/* Disabled is used for one thing: the hero's arming window after a navigation,
+ * which lasts a few hundred milliseconds. Kept almost invisible, because a
+ * control that looks broken for 250ms is worse than one that quietly ignores a
+ * stray tap. */
+.pt-slot:disabled { cursor: default; opacity: 0.85; }
+
+.pt-slot-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The clipboard indicator on OPEN. The only gold on a non-hero slot, and it
+ * appears only when there is something to open. */
+.pt-dot {
+  flex: none;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--pt-accent);
+}
+
+/* The hero ---------------------------------------------------------------- */
+
+/* A wash, not a fill. A solid gold slab is the brightest object on a black
+ * screen and pulls the eye off the picture. The wash plus a hairline reads as
+ * the primary action without out-shouting the art. */
+.pt-slot-hero {
+  background: var(--pt-accent-wash);
+  box-shadow: inset 0 0 0 1px var(--pt-accent);
+  color: var(--pt-accent);
+  letter-spacing: var(--pt-track-wide);
+}
+.pt-slot-hero:hover { box-shadow: inset 0 0 0 1px var(--pt-accent-hi); color: var(--pt-accent-hi); }
+.pt-slot-hero:active { background: rgba(255, 215, 0, 0.2); }
+
+.pt-hero-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: transform var(--pt-dur-fast) ease-out;
+}
+
+.pt-bracket {
+  position: absolute;
+  font-size: var(--pt-size-xl);
+  line-height: 1;
+  letter-spacing: 0;
+  transition: transform var(--pt-dur-fast) ease-out;
+}
+.pt-bracket-l { left: var(--pt-space-3); }
+.pt-bracket-r { right: var(--pt-space-3); }
+
+/* The clamp. The brackets close over the word rather than on an empty bar:
+ * fading the label out would erase the promised word at the moment the promise
+ * is kept. Scaling it keeps it visible while the brackets squeeze it. */
+.pt-slot-hero.is-firing .pt-bracket-l { transform: translateX(34%); }
+.pt-slot-hero.is-firing .pt-bracket-r { transform: translateX(-34%); }
+.pt-slot-hero.is-firing .pt-hero-label { transform: scaleX(0.8); }
+
+/* There is no reduced version of the clamp. actionbar.js resolves fire()
+ * immediately instead, and the screen change does the confirming. */
+@media (prefers-reduced-motion: reduce) {
+  .pt-slot,
+  .pt-hero-label,
+  .pt-bracket { transition: none; }
+}

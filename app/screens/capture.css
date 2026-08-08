@@ -1,0 +1,111 @@
+/* Plane Text: capture.
+ *
+ * Layout A, "chrome in the letterbox". The capture aspect is a fixed 3:4
+ * portrait and phones are roughly 19.5:9, so about a third of the screen can
+ * never be in the shot. That dead space is where the chrome goes: style at the
+ * top, readout at the bottom, nothing floating over the picture.
+ *
+ * The alternative was full-bleed art with the capture region marked by dimming,
+ * camera-app style. It was rejected because every dimmed cell is ASCII that was
+ * rendered and then thrown away, and because it puts 12px chrome over moving
+ * art.
+ */
+
+.sc-capture {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-3);
+  padding: var(--pt-space-3) 0 var(--pt-space-3);
+}
+
+/* Style selector ----------------------------------------------------------- */
+
+/* No box and no pills: words with a hairline underline on the active one. The
+ * underline is the same 1px gold as everything else that marks a selection. */
+.sc-styles {
+  display: flex;
+  justify-content: center;
+  gap: var(--pt-space-3);
+  padding: 0 var(--pt-space-3);
+  flex: none;
+
+  /* Clamped to the art. The stage below is not: it is the box the art is
+   * measured against, and clamping it would feed back into the fit. */
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin: 0 auto;
+}
+
+.sc-style {
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;   /* single-sided borders never get a radius */
+  padding: var(--pt-space-1) 2px 3px;
+  color: var(--pt-ink-faint);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track);
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--pt-dur-base) ease;
+}
+.sc-style:hover { color: var(--pt-ink-dim); }
+.sc-style.is-on { color: var(--pt-accent); border-bottom-color: var(--pt-accent); }
+
+/* The viewfinder ----------------------------------------------------------- */
+
+/* min-height:0 lets this shrink inside the flex column instead of pushing the
+ * readout off the bottom on a short viewport. */
+.sc-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--pt-art-bg);
+}
+
+/* The art. font-size and line-height are set from JS by art.js, computed from
+ * the imported advance and line-height for the codec. Never here, and never
+ * from a value typed into CSS.
+ *
+ * width:max-content matters for the reason it does in the wrapper: without it
+ * the element clamps to its container and an under-filling grid measures as a
+ * perfect fit.
+ *
+ * font-kerning and ligatures off: a font that alters advance between adjacent
+ * cells would shear the grid rather than stretch it, and that is the one font
+ * failure with no recovery. */
+.sc-art {
+  margin: 0;
+  width: max-content;
+  white-space: pre;
+  font-family: var(--pt-mono);
+  color: var(--pt-art-ink);
+  font-kerning: none;
+  font-variant-ligatures: none;
+  text-size-adjust: none;
+  -webkit-text-size-adjust: none;
+  user-select: none;
+}
+
+/* Readout ------------------------------------------------------------------ */
+
+.sc-readout {
+  flex: none;
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin: 0 auto;
+  text-align: center;
+  font-size: var(--pt-size-xs);
+  color: var(--pt-ink-faint);
+  letter-spacing: var(--pt-track);
+}
+
+/* Amber, never red. The legibility cap is advice: the user is told the
+ * recipient will have to zoom, and is not stopped. It fires at the top of the
+ * slider by construction (SHELL.md disagreement 3). */
+.sc-readout.is-warn { color: var(--pt-warn); }

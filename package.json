@@ -1,0 +1,15 @@
+{
+  "name": "plane-text",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Send photographs as plain text, for networks that pass text but block images.",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "serve": "python3 -m http.server 8080 --directory ..",
+    "precache": "node tools/build-precache.js",
+    "icons": "node tools/make-icons.js",
+    "encode": "node tools/encode-cli.js",
+    "testd": "node tools/make-test-d.js"
+  }
+}

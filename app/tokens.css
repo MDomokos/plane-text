@@ -1,0 +1,145 @@
+/* Plane Text: design tokens. Values only. No selectors beyond :root.
+ *
+ * If you are writing a rule that matches an element, it does not belong here.
+ * Shell frame -> shell.css. Screen internals -> app/screens/<id>.css.
+ *
+ * Dark only, and not as a theme choice. Polarity is an encoder concern
+ * (constants.js INVERT_DEFAULT), and light mode is deferred until the tone
+ * curve is re-tuned, so a light UI would misrepresent what the app produces.
+ *
+ * Retuned 2026-08-09. Values changed; every token name is the one the shell
+ * shipped, so nothing that consumed them had to move. The reference is
+ * github.com/MDomokos/maybe-rain. Four of its rules apply here:
+ *
+ *   1. True black, no elevation. There is no shadow token. Surfaces separate
+ *      by hairline, not by lightness, and a panel dims what is behind it
+ *      rather than floating above it. The previous #0b0d10 read as a surface,
+ *      which competes with white-on-black art.
+ *   2. One accent, used once per view. Gold on black. The previous mint
+ *      (#7fd1c1) predates the design conversation.
+ *   3. Monospace everywhere, including the chrome. --pt-font is a mono stack.
+ *      Form elements do not inherit font-family, so every control needs an
+ *      explicit `font-family: inherit`.
+ *   4. One radius, 2px, on everything, including controls that look like they
+ *      want to be round. This is why the shutter is a bar and not a disc.
+ *
+ * --pt-art-bg and --pt-art-ink are unchanged and stay apart from the UI
+ * palette. They are what the recipient sees.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Colour ------------------------------------------------------------- */
+
+  /* One plane. Every flush panel draws on it. Named so a future theme is a
+   * second block of values with no component CSS touched. */
+  --pt-bg: #000000;
+  --pt-surface: #000000;
+  --pt-surface-2: #0a0c0e;
+
+  /* One hairline weight in three strengths: control border, hover and
+   * structural rules, row dividers. Panels separate by these, never by a
+   * lightness step. */
+  --pt-line: rgba(255, 255, 255, 0.25);
+  --pt-line-strong: rgba(255, 255, 255, 0.6);
+  --pt-divider: rgba(255, 255, 255, 0.1);
+
+  --pt-ink: #ffffff;
+  --pt-ink-dim: #cccccc;
+  --pt-ink-faint: #888888;
+
+  /* The accent, with two shades for hover and press on a filled control.
+   * Used for the active style, the hero action and the focus ring. If two
+   * things on a screen are gold, one of them is wrong. */
+  --pt-accent: #ffd700;
+  --pt-accent-hi: #ffe44d;
+  --pt-accent-lo: #e6c200;
+  --pt-accent-ink: #000000;
+
+  /* The hero button is a wash rather than a fill so the art stays the
+   * brightest thing on screen. A solid gold slab under a black viewfinder
+   * pulls the eye off the picture. */
+  --pt-accent-wash: rgba(255, 215, 0, 0.12);
+
+  --pt-warn: #e0a83e;
+  --pt-error: #e0807a;
+
+  /* The art itself. Kept apart from the UI palette. The message is rendered
+   * at these colours and they are what the recipient sees, so a UI restyle
+   * must not move them by accident. */
+  --pt-art-bg: #000000;
+  --pt-art-ink: #ffffff;
+
+  /* Type ---------------------------------------------------------------- */
+
+  /* Both stacks are monospace and identical for now. --pt-font is what the
+   * chrome uses. --pt-mono is the name to reach for when the intent is "this
+   * is data, align it". They may diverge later; they do not today, and a
+   * control that sets neither inherits the right one. */
+  --pt-font: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, monospace;
+  --pt-mono: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, monospace;
+
+  --pt-size-xs: 0.75rem;   /* 12: captions, secondary readouts */
+  --pt-size-sm: 0.875rem;  /* 14: body small, labels */
+  --pt-size-md: 1rem;      /* 16: body. Never below this for a control. */
+  --pt-size-lg: 1.25rem;   /* 20: screen headings */
+  --pt-size-xl: 1.5rem;    /* 24: the one number a screen is about */
+
+  /* Uppercase mono labels set too tight without tracking. Two values: chrome
+   * labels, and the hero button's wider setting. */
+  --pt-track: 0.08em;
+  --pt-track-wide: 0.2em;
+
+  --pt-line-tight: 1.2;
+  --pt-line-body: 1.5;
+
+  /* Space, 4px scale ---------------------------------------------------- */
+  --pt-space-1: 4px;
+  --pt-space-2: 8px;
+  --pt-space-3: 12px;
+  --pt-space-4: 16px;
+  --pt-space-5: 24px;
+  --pt-space-6: 32px;
+
+  --pt-radius: 2px;
+  --pt-radius-sm: 2px;
+
+  /* Minimum tap target, and the number the action bar checks its slot ratios
+   * against. */
+  --pt-tap: 44px;
+
+  /* Frame --------------------------------------------------------------- */
+
+  /* The rendered width of the art, republished by app/art.js on every fit.
+   * The chrome clamps to it so controls belong to the picture rather than to
+   * the window: the art is 3:4 and usually height-bound, so on anything wider
+   * than a phone it is a column in the middle of the screen. 100% until the
+   * first paint, and on a phone it resolves to roughly the full width anyway.
+   *
+   * Never applied to the element the art is measured inside. Clamping that
+   * would feed the measurement back into itself. */
+  --pt-art-w: 100%;
+
+  --pt-header-h: 48px;
+  --pt-bottom-h: 64px;
+
+  /* The action bar's own height. Taller than --pt-bottom-h's minimum because
+   * the hero carries a bracket glyph at display size. */
+  --pt-action-h: 52px;
+
+  /* Safe areas. viewport-fit=cover is set in index.html, so these are live.
+   * Without it env() resolves to 0 and the bottom bar sits under the home
+   * indicator. */
+  --pt-safe-top: env(safe-area-inset-top, 0px);
+  --pt-safe-right: env(safe-area-inset-right, 0px);
+  --pt-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --pt-safe-left: env(safe-area-inset-left, 0px);
+
+  --pt-focus: 2px solid var(--pt-accent);
+
+  /* Motion. Two durations. The shutter uses the fast one, and that animation
+   * is the whole capture feedback, since there is no flash. */
+  --pt-dur-fast: 110ms;
+  --pt-dur-base: 200ms;
+}

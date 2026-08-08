@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- charset first, and inside the first 1024 bytes. The payload is U+00A0,
+     U+2800 and Block Elements. A late or missing charset turns every one of
+     them into mojibake before any script runs. -->
+<title>Plane Text</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Send photographs as plain text, for networks that pass text but block images.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+
+<!-- Every URL below is relative. GitHub Pages serves this from a sub-path
+     (/plane-text/), so a leading slash would 404 there and break the install.
+     Routing is hash-based for the same reason: no server rewrite exists. -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="app/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="app/icon-192.png">
+
+<!-- iOS ignores the manifest for display mode and icons. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Plane Text">
+
+<link rel="stylesheet" href="app/tokens.css">
+<link rel="stylesheet" href="app/shell.css">
+
+<!-- Shared components, then one per screen. Order matters only in that tokens
+     comes first; nothing below overrides anything above it.
+
+     Ordinary <link> tags rather than @import, because @import serialises the
+     fetches. Every one of these files is precached, so on the flight that
+     matters they all come from the cache at once. Adding a screen stylesheet
+     means adding it here and running `npm run precache`. -->
+<link rel="stylesheet" href="app/actionbar.css">
+<link rel="stylesheet" href="app/screens/capture.css">
+<link rel="stylesheet" href="app/screens/paste.css">
+<link rel="stylesheet" href="app/screens/compose.css">
+</head>
+<body>
+
+<header class="app-header">
+  <button class="app-back" id="app-back" type="button" aria-label="Back" hidden>&lsaquo;</button>
+  <h1 class="app-title" id="app-title">Plane Text</h1>
+  <!-- Owned by the offline-shell agent. The version string and offline-ready
+       readout go here. Screens must not write to it. -->
+  <div class="app-header-slot" id="app-header-slot"></div>
+</header>
+
+<!-- The one screen mount point. The router clears it on every navigation. -->
+<main class="app-screen" id="app-screen" tabindex="-1"></main>
+
+<!-- Bottom bar slot. Cleared before every mount. The screen fills it via
+     ctx.bottomBar, or leaves it empty and it collapses. -->
+<nav class="app-bottom" id="app-bottom" aria-label="Screen actions"></nav>
+
+<script type="module" src="app/main.js"></script>
+</body>
+</html>

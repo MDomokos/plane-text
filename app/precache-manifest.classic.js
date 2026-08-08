@@ -1,0 +1,55 @@
+// Generated file. Do not edit. Run `npm run precache`.
+//
+// The classic-script twin of precache-manifest.js, for a service worker that
+// is registered without { type: 'module' }:
+//
+//   importScripts('app/precache-manifest.classic.js');
+//   self.PRECACHE.map(function (p) { return new URL(p, self.location).href; });
+
+self.PRECACHE_VERSION = 'pt-4bd4ab3b3980';
+
+self.PRECACHE = [
+  'app/actionbar.css',
+  'app/actionbar.js',
+  'app/art.js',
+  'app/icon-192.png',
+  'app/icon-512.png',
+  'app/icon-maskable-512.png',
+  'app/icon.svg',
+  'app/main.js',
+  'app/mock.js',
+  'app/pipeline.js',
+  'app/precache-manifest.classic.js',
+  'app/precache-manifest.js',
+  'app/recents.js',
+  'app/router.js',
+  'app/screen.js',
+  'app/screens/capture.css',
+  'app/screens/capture.js',
+  'app/screens/charsets.js',
+  'app/screens/compose.css',
+  'app/screens/compose.js',
+  'app/screens/index.js',
+  'app/screens/paste.css',
+  'app/screens/paste.js',
+  'app/screens/settings.js',
+  'app/screens/size-test.js',
+  'app/shell.css',
+  'app/state.js',
+  'app/tokens.css',
+  'app/words.js',
+  'index.html',
+  'manifest.webmanifest',
+  'src/calibrate.js',
+  'src/cells.js',
+  'src/constants.js',
+  'src/encode.js',
+  'src/fit.js',
+  'src/lint.js',
+  'src/metrics.js',
+  'src/sizing.js',
+  'src/styles.js',
+  'src/tone.js',
+  'src/wire.js',
+  'src/wrap.js',
+];

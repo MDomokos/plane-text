@@ -1,0 +1,184 @@
+/* Plane Text: the viewer.
+ *
+ * The same screen for a photo you shot, one you picked, and one you received.
+ * Everything below is shared. Only the slider and the wording of the fit line
+ * differ, and both are handled in JS rather than by a second stylesheet.
+ */
+
+.sc-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pt-space-2);
+  padding: var(--pt-space-3) 0;
+  position: relative;
+}
+
+/* Name --------------------------------------------------------------------- */
+
+.sc-view-name {
+  flex: none;
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin: 0 auto;
+  padding: 0 var(--pt-space-4);
+  text-align: center;
+  font-size: var(--pt-size-xs);
+  color: var(--pt-ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Art ---------------------------------------------------------------------- */
+
+.sc-view-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--pt-art-bg);
+}
+
+.sc-view-art {
+  margin: 0;
+  width: max-content;
+  white-space: pre;
+  font-family: var(--pt-mono);
+  color: var(--pt-art-ink);
+  font-kerning: none;
+  font-variant-ligatures: none;
+  text-size-adjust: none;
+  -webkit-text-size-adjust: none;
+  user-select: none;
+}
+
+/* Readouts ----------------------------------------------------------------- */
+
+/* The device-fit line is the primary metric and reads as a sentence, because
+ * "fits a phone" is what the slider is choosing. */
+.sc-view-fit {
+  flex: none;
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin: 0 auto;
+  text-align: center;
+  font-size: var(--pt-size-sm);
+  color: var(--pt-ink);
+}
+.sc-view-fit.is-warn { color: var(--pt-warn); }
+
+/* The character count is secondary and quiet. No fill bar: at a third of the
+ * ceiling it would say "you have loads of room", which is true and misleading,
+ * since the room cannot be spent on a bigger picture. */
+.sc-view-chars {
+  flex: none;
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin: 0 auto;
+  text-align: center;
+  font-size: var(--pt-size-xs);
+  color: var(--pt-ink-faint);
+}
+
+/* Slider ------------------------------------------------------------------- */
+
+/* Hidden for a received message: it is already encoded and there is nothing to
+ * choose. Absent rather than disabled, since a disabled control is
+ * low-contrast, shows no tooltip on touch, and implies it could be enabled. */
+.sc-view-slider {
+  flex: none;
+  width: calc(100% - var(--pt-space-5) * 2);
+  max-width: calc(var(--pt-art-w) - var(--pt-space-5) * 2);
+  margin: var(--pt-space-2) auto 0;
+  accent-color: var(--pt-accent);
+  height: var(--pt-tap);
+}
+.sc-view-slider[hidden] { display: none; }
+
+/* Save sheet --------------------------------------------------------------- */
+
+/* Flush, not floating. It sits on the same black plane and dims the picture
+ * behind it: no elevation anywhere, surfaces separated by a hairline. */
+.sc-view.is-dimmed > .sc-view-name,
+.sc-view.is-dimmed > .sc-view-stage,
+.sc-view.is-dimmed > .sc-view-fit,
+.sc-view.is-dimmed > .sc-view-chars,
+.sc-view.is-dimmed > .sc-view-slider {
+  filter: brightness(0.3);
+  pointer-events: none;
+  transition: filter var(--pt-dur-base) ease;
+}
+
+/* The panel itself spans the frame, because a surface that stops short of the
+ * edge reads as a floating card and there is no elevation in this app. Its
+ * contents clamp to the art like everything else. */
+.sc-sheet-head,
+.sc-sheet-row { max-width: var(--pt-art-w); margin-inline: auto; }
+
+.sc-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--pt-bg);
+  border-top: 1px solid var(--pt-line-strong);
+  padding: var(--pt-space-4) 0 var(--pt-space-4);
+}
+
+.sc-sheet-head {
+  margin: 0 0 var(--pt-space-3);
+  padding: 0 var(--pt-space-4);
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track-wide);
+  color: var(--pt-ink-faint);
+}
+
+.sc-sheet-row {
+  width: 100%;
+  min-height: var(--pt-tap);
+  display: flex;
+  align-items: center;
+  gap: var(--pt-space-3);
+  padding: var(--pt-space-3) var(--pt-space-4);
+
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--pt-divider);
+  border-radius: 0;   /* single-sided border, so no radius */
+  color: var(--pt-ink-dim);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.sc-sheet-row:hover { color: var(--pt-ink); }
+
+.sc-sheet-ext {
+  flex: none;
+  width: 44px;
+  color: var(--pt-accent);
+  letter-spacing: var(--pt-track);
+}
+.sc-sheet-blurb { flex: 1; line-height: var(--pt-line-body); }
+.sc-sheet-size { flex: none; color: var(--pt-ink-faint); white-space: nowrap; }
+
+.sc-sheet-cancel {
+  display: block;
+  width: calc(100% - var(--pt-space-4) * 2);
+  max-width: calc(var(--pt-art-w) - var(--pt-space-4) * 2);
+  min-height: var(--pt-tap);
+  margin: var(--pt-space-4) auto 0;
+  background: none;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-dim);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track);
+  cursor: pointer;
+}
+.sc-sheet-cancel:hover { box-shadow: inset 0 0 0 1px var(--pt-line-strong); }
