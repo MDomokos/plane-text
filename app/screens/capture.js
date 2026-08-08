@@ -157,6 +157,13 @@ export default register(defineScreen({
       notice.append(h, p);
     }
 
+    // The hero's label element, looked up once. querySelector inside a function
+    // that runs twenty times a second is a DOM walk twenty times a second for
+    // an element that never changes.
+    let heroLabel = null;
+    let lastReadout = '';
+    let lastWord = '';
+
     function render(stats) {
       const s = state.get();
       const style = currentStyle(s);
@@ -175,8 +182,13 @@ export default register(defineScreen({
       // Only surface degradation once it has actually happened. A frame-rate
       // readout that is always on trains the user to ignore it.
       if (stats && stats.degraded) text += ` · ${stats.rungLabel}`;
-      if (showPerf && stats) text += ` · ${stats.meanMs.toFixed(1)}ms @${stats.fps}`;
-      readout.textContent = text;
+      if (showPerf && stats) text += ` · ${stats.meanMs.toFixed(1)}ms @${stats.fps} · ${stats.backend}`;
+      // Writing identical text still dirties the node and costs the next frame
+      // a layout flush when the viewfinder reads its box.
+      if (text !== lastReadout) {
+        readout.textContent = text;
+        lastReadout = text;
+      }
 
       // The legibility cap warns and does not clamp (2026-08-09). Note this
       // fires at the top of the slider for both codecs by construction --
@@ -184,7 +196,11 @@ export default register(defineScreen({
       // error, or the app cries wolf at its own maximum.
       readout.classList.toggle('is-warn', Boolean(result && result.warnings.length));
 
-      bar.hero.querySelector('.pt-hero-label').textContent = word;
+      if (!heroLabel) heroLabel = bar.hero.querySelector('.pt-hero-label');
+      if (heroLabel && word !== lastWord) {
+        heroLabel.textContent = word;
+        lastWord = word;
+      }
     }
 
     // --- action bar -----------------------------------------------------

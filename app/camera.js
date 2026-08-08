@@ -33,7 +33,49 @@
 // the loop it replaces.
 //
 // ---------------------------------------------------------------------------
-// WHY THE PREVIEW BUFFER IS ALREADY DOT-SIZED.
+// WHY THE PREVIEW BUFFER IS SUPERSAMPLED, AND WHY IT WAS NOT AT FIRST.
+//
+// The first version of this file grabbed at exactly the dot resolution, on the
+// reasoning that `encode()` would then run verbatim on a tiny buffer and the
+// app would have one pipeline. It does have one pipeline. It did not have one
+// COMPUTATION, and the difference was visible: the live feed crushed contrast
+// against the still it was previewing.
+//
+// Two mechanisms, both from the same cause -- two steps of the tone chain are
+// resolution-dependent, so running them on a pre-averaged buffer is not the
+// same operation:
+//
+//   1. `unsharp` has a radius of ONE PIXEL. On a still that is sub-cell detail.
+//      On a ramp preview, where the cell is 1x1 dots, one pixel IS one cell, so
+//      a radius-1 unsharp becomes a whole-cell local-contrast boost, and its
+//      overshoot pins cells at both ends of the ramp.
+//   2. The still tone-maps and THEN averages, inside `buildGrid`'s downscale.
+//      A dot-resolution preview averages and THEN tone-maps. Clip, gamma and
+//      compress do not commute with averaging.
+//
+// Measured at 103 columns on the ramp codec, against the still as reference:
+// cells pinned to the first or last glyph went 3.4% -> 6.4% (portrait) and
+// 4.1% -> 8.9% (scene), and the darkest bucket was three to four times
+// overpopulated. Braille barely moved, because its cell is 2x4 dots and it was
+// therefore already supersampled -- which is exactly the shape of the fix.
+//
+// SUPERSAMPLE FACTOR: enough source samples that every cell has at least
+// MIN_SAMPLES_PER_CELL along each axis. Ramp cells are 1x1 and need 2x.
+// Braille (2x4) and quadrant (2x2) already qualify and pay nothing. At 2x the
+// clipping returns to 3.6% / 4.0% against the still's 3.4% / 4.1%.
+//
+// Going past 2x tracks the still's exact cell values more closely -- 3.5% of
+// cells differ at 4x against 9% at 2x -- but the clipping is already fixed at
+// 2x, so that buys grid agreement rather than tone, at four times the pixels.
+//
+// A NOTE FOR WHOEVER TRUSTS THE HEALTH METRIC: `rampHealth`'s entropy went UP
+// on the broken preview, 0.946 -> 0.967, while clipping doubled. Pushing mass
+// into the end buckets flattens the histogram. Entropy and `clipped` disagree
+// in sign here, and entropy alone would have called the broken preview the
+// healthier of the two.
+//
+// ---------------------------------------------------------------------------
+// WHY THE PREVIEW BUFFER IS STILL SIZED FROM THE DOT GRID.
 //
 // It means `encode()` runs on it verbatim -- the real tone chain, the real
 // codec, the real wrapper -- rather than the viewfinder growing a private
@@ -70,6 +112,25 @@ const IDEAL_HEIGHT = 1440;
 // shrinking image, which is nothing, and the last step lands on the odd target
 // size with a ratio under 2.
 const MAX_STEP_RATIO = 4;
+
+// Source samples per cell edge, before `buildGrid` averages them down.
+//
+// Two is where the measured clipping returns to the still's. See the long note
+// above; this is the number that fixes the contrast crush, and it is expressed
+// per CELL rather than per dot because the cell is the unit whose interior
+// detail `unsharp` needs in order to be the operation it is on a still.
+export const MIN_SAMPLES_PER_CELL = 2;
+
+// How much to supersample a codec's dot grid to reach that.
+//
+// Exported and pure so a test can pin it, and so the frame-budget arithmetic
+// elsewhere can ask rather than assume. Ramp is 1x1 dots per cell and returns
+// 2; braille (2x4) and quadrant (2x2) already clear the bar and return 1.
+export function supersampleFor(codec) {
+  const cell = CELL_DOTS[codec];
+  if (!cell) throw new Error(`unknown codec ${codec}`);
+  return Math.max(1, Math.ceil(MIN_SAMPLES_PER_CELL / Math.min(cell.w, cell.h)));
+}
 
 export class CameraError extends Error {
   constructor(code, message) {
@@ -252,17 +313,28 @@ export async function openCamera({ facingMode = 'environment', host = null } = {
       const dotsW = cols * cell.w;
       const dotsH = rows * cell.h;
 
+      // Supersample so the tone chain has sub-cell detail to work on, and so
+      // the averaging happens inside buildGrid AFTER the tone chain, which is
+      // the order the still uses. k is 1 for the cell codecs, so they grab
+      // exactly what they did before.
+      const k = supersampleFor(codec);
+      const grabW = dotsW * k;
+      const grabH = dotsH * k;
+
       const { sx, sy, sw, sh } = cropRect(CAPTURE_ASPECT);
-      const out = drawDown(sx, sy, sw, sh, dotsW, dotsH);
-      const img = out.ctx.getImageData(0, 0, dotsW, dotsH);
+      const out = drawDown(sx, sy, sw, sh, grabW, grabH);
+      const img = out.ctx.getImageData(0, 0, grabW, grabH);
 
       return {
         rgba: img.data,
-        width: dotsW,
-        height: dotsH,
+        width: grabW,
+        height: grabH,
         rows,
-        // Exactly the buffer's own ratio, so encode()'s fitToAspect is a no-op.
-        aspect: dotsW / dotsH,
+        supersample: k,
+        // The buffer's own ratio, so encode()'s fitToAspect is a no-op. Scaling
+        // both axes by the same k leaves this identical to the dot grid's
+        // ratio, which is what keeps rowsFor() recovering the same row count.
+        aspect: grabW / grabH,
       };
     },
 

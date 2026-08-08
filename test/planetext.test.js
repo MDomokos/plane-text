@@ -1656,13 +1656,29 @@ test('a dot-resolution preview buffer round-trips its own geometry', async () =>
   // silently renders a different grid from the one the readout reports.
   const { CELL_DOTS, CAPTURE_ASPECT } = await import('../src/constants.js');
   const { encode } = await import('../src/encode.js');
+  const { supersampleFor, MIN_SAMPLES_PER_CELL } = await import('../app/camera.js');
+
+  // The supersample factor is what fixes the contrast crush: the tone chain
+  // must see sub-cell detail, because unsharp's radius is in pixels and the
+  // still averages AFTER tone mapping while a dot-resolution preview averages
+  // before. Ramp cells are 1x1 dots and need help; the cell codecs do not.
+  assert.equal(supersampleFor(CODEC.RAMP), 2);
+  assert.equal(supersampleFor(CODEC.BRAILLE), 1);
+  assert.equal(supersampleFor(CODEC.QUADRANT), 1);
+  for (const codec of [CODEC.BRAILLE, CODEC.QUADRANT, CODEC.RAMP]) {
+    const cell = CELL_DOTS[codec];
+    const k = supersampleFor(codec);
+    assert.ok(cell.w * k >= MIN_SAMPLES_PER_CELL && cell.h * k >= MIN_SAMPLES_PER_CELL,
+      `${codec}: every cell must get at least ${MIN_SAMPLES_PER_CELL} samples per axis`);
+  }
 
   for (const codec of [CODEC.BRAILLE, CODEC.QUADRANT, CODEC.RAMP]) {
     const cell = CELL_DOTS[codec];
+    const k = supersampleFor(codec);
     for (const cols of [40, 65, 103, 130, 184]) {
       const rows = rowsFor(cols, CAPTURE_ASPECT, 1, codec);
-      const w = cols * cell.w;
-      const h = rows * cell.h;
+      const w = cols * cell.w * k;
+      const h = rows * cell.h * k;
 
       assert.equal(rowsFor(cols, w, h, codec), rows, `${codec} @${cols}: rows must survive the buffer`);
 

@@ -38,6 +38,7 @@ import { encode } from '../src/encode.js';
 import { currentStyle, currentCols } from './state.js';
 import { fitFontSize } from './art.js';
 import { getAtlas, blitGrid, measureAdvance } from './atlas.js';
+import { createGlyphRenderer } from './glyphgl.js';
 
 // The EMA. Roughly a ten-frame window: fast enough that walking into shade
 // tracks, slow enough that a hand passing the lens does not repaint the world.
@@ -90,12 +91,6 @@ export function startViewfinder({
   signal,
   onStats = null,
 }) {
-  const ctx = canvas.getContext('2d');
-  // The blit is a 1:1 device-pixel copy. Smoothing would only ever cost time
-  // here, and on a fractional DPR it would soften every glyph edge in the
-  // atlas -- which is the coverage information rule 1 exists to preserve.
-  ctx.imageSmoothingEnabled = false;
-
   const css = getComputedStyle(document.documentElement);
   const font = css.getPropertyValue('--pt-mono').trim() || 'monospace';
   const ink = css.getPropertyValue('--pt-art-ink').trim() || '#fff';
@@ -110,6 +105,66 @@ export function startViewfinder({
   let stopped = false;
   let last = 0;
   let paused = false;
+
+  // --- the drawing surface ------------------------------------------------
+  //
+  // WebGL where it exists, the 2D atlas blit where it does not. Measured, the
+  // gap is not marginal: ~30ms of drawImage calls per frame at 65 columns on a
+  // desktop against one draw call. See the header of glyphgl.js.
+  //
+  // A canvas can only ever have one kind of context, so these two cannot share
+  // an element. That matters on context loss -- the GPU can take the context
+  // away at any time, most often when the OS is under memory pressure, which on
+  // a phone is exactly when someone is trying to take a photograph. Recovering
+  // means putting a NEW canvas in the old one's place. Hence the indirection.
+  let surface = canvas;
+  let renderer = null;
+  let ctx2d = null;
+
+  function useCanvas2d() {
+    renderer = null;
+    ctx2d = surface.getContext('2d');
+    // The blit is a 1:1 device-pixel copy. Smoothing would only ever cost time
+    // here, and on a fractional DPR it would soften every glyph edge in the
+    // atlas -- which is the coverage information rule 1 exists to preserve.
+    ctx2d.imageSmoothingEnabled = false;
+  }
+
+  function onContextLost() {
+    console.warn('viewfinder: WebGL context lost, falling back to canvas2d');
+    const replacement = surface.cloneNode(false);
+    replacement.width = 0;
+    replacement.height = 0;
+    surface.replaceWith(replacement);
+    if (renderer) renderer.dispose();
+    surface = replacement;
+    useCanvas2d();
+    // The atlas is unchanged, but the new canvas has painted nothing yet, and
+    // the rAF gate could be up to a frame away. Paint on the next tick rather
+    // than synchronously: we are inside the GPU's own event handler here.
+    if (!stopped) setTimeout(() => { if (!stopped) renderOnce(); }, 0);
+  }
+
+  renderer = createGlyphRenderer(surface, { ink, bg, onLost: onContextLost });
+  if (!renderer) useCanvas2d();
+
+  // The stage box, kept current by observation rather than measured per frame.
+  let boxWidth = 0;
+  let boxHeight = 0;
+  const ro = new ResizeObserver((entries) => {
+    const r = entries[entries.length - 1].contentRect;
+    if (r.width > 0 && r.height > 0) {
+      boxWidth = r.width;
+      boxHeight = r.height;
+    }
+  });
+  ro.observe(stage);
+
+  // The last CSS size written to the surface, so an unchanged frame writes
+  // nothing. A style write on an element the next frame is about to read from
+  // is what turns a cheap read into a full layout flush.
+  let cssW = '';
+  let cssH = '';
 
   // The smoothed endpoints, in post-unsharp luma space. Null until the first
   // measured frame, which is also the frame that renders unsmoothed -- there is
@@ -207,9 +262,15 @@ export function startViewfinder({
 
     // --- geometry -------------------------------------------------------
     const rows = result.stats.rows;
-    const box = stage.getBoundingClientRect();
-    const boxW = box.width || 1;
-    const boxH = box.height || 1;
+    // The box comes from the ResizeObserver, not from a measurement taken here.
+    //
+    // getBoundingClientRect() is a layout READ, and the previous frame ended by
+    // WRITING styles -- the canvas size, the readout text. A read after a write
+    // forces a synchronous style and layout flush, and doing that twenty times
+    // a second is the classic layout-thrash shape. The observer already knows
+    // the answer and knows it without flushing anything.
+    const boxW = boxWidth || stage.clientWidth || 1;
+    const boxH = boxHeight || stage.clientHeight || 1;
 
     // Measure the advance before choosing a font size, then build the atlas at
     // that size. The <pre> path cannot do this -- it sets a size and finds out
@@ -223,17 +284,37 @@ export function startViewfinder({
 
     const wantW = cols * atlas.dw;
     const wantH = rows * atlas.dh;
-    if (canvas.width !== wantW || canvas.height !== wantH) {
-      canvas.width = wantW;
-      canvas.height = wantH;
-      // Resizing a canvas resets its context state, so this has to be re-set
-      // rather than set once at construction. A quiet source of soft output.
-      ctx.imageSmoothingEnabled = false;
-    }
-    canvas.style.width = `${cols * atlas.cellW}px`;
-    canvas.style.height = `${rows * atlas.cellH}px`;
 
-    blitGrid(ctx, atlas, result.grid, { bg });
+    let drawn = false;
+    if (renderer && !renderer.lost) {
+      // The GL path sizes its own drawing buffer: setting canvas.width from out
+      // here would reset the viewport behind its back.
+      drawn = renderer.draw(atlas, result.grid);
+      if (!drawn) {
+        // A codec whose atlas will not fit an 8-bit index texture. Not an
+        // error, just outside what this renderer can address.
+        onContextLost();
+      }
+    }
+    if (!drawn) {
+      if (surface.width !== wantW || surface.height !== wantH) {
+        surface.width = wantW;
+        surface.height = wantH;
+        // Resizing a canvas resets its context state, so this has to be re-set
+        // rather than set once at construction. A quiet source of soft output.
+        ctx2d.imageSmoothingEnabled = false;
+      }
+      blitGrid(ctx2d, atlas, result.grid, { bg });
+    }
+
+    const wantCssW = `${cols * atlas.cellW}px`;
+    const wantCssH = `${rows * atlas.cellH}px`;
+    if (cssW !== wantCssW || cssH !== wantCssH) {
+      surface.style.width = wantCssW;
+      surface.style.height = wantCssH;
+      cssW = wantCssW;
+      cssH = wantCssH;
+    }
 
     latest = { result, cols, rows, atlas, fontSize };
     return latest;
@@ -293,6 +374,7 @@ export function startViewfinder({
         rung,
         rungLabel: cfg.label,
         degraded: rung > 0,
+        backend: renderer ? renderer.backend : 'canvas2d',
         result: latest ? latest.result : null,
         cols: latest ? latest.cols : 0,
       });
@@ -324,6 +406,11 @@ export function startViewfinder({
     stopped = true;
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
+    ro.disconnect();
+    // A browser caps live WebGL contexts per page at a low number, and it
+    // evicts the oldest silently. Navigating to compose and back a few times
+    // would otherwise cost us the context we are still using.
+    if (renderer) { renderer.dispose(); renderer = null; }
   }
 
   schedule();
@@ -339,6 +426,10 @@ export function startViewfinder({
       try { return renderOnce(); } finally { busy = false; }
     },
     get latest() { return latest; },
+    get backend() { return renderer ? renderer.backend : 'canvas2d'; },
+    // The live canvas, which is NOT necessarily the one the caller passed in:
+    // a lost GL context is recovered by putting a fresh element in its place.
+    get canvas() { return surface; },
     get isStatic() { return LADDER[rung].fps === 0; },
     get rung() { return rung; },
     get rungLabel() { return LADDER[rung].label; },
