@@ -17,7 +17,7 @@
 // README.md, and one of those was the Test D harness disagreeing with the
 // wrapper about this line-height.
 
-import { advanceCssFor } from '../src/constants.js';
+import { advanceCssFor, CAPTURE_ASPECT } from '../src/constants.js';
 import { baseLineHeight } from '../src/sizing.js';
 
 // Fit a cols x rows grid into a box and return the font size that does it.
@@ -34,9 +34,9 @@ import { baseLineHeight } from '../src/sizing.js';
 // inheriting the CSS baseline. The <pre> path cannot: it sets a font size and
 // finds out afterwards. The canvas viewfinder can, because it has to measure
 // the advance anyway to size the atlas cell, and feeding a stale guess in here
-// would size the canvas for a glyph width the atlas does not use -- the art
-// would overflow its stage on any font whose real advance runs wide, which
-// Block Elements does by 18% on a Pixel.
+// would size the canvas for a glyph width the atlas does not use, so the art
+// overflows its stage on any font whose real advance runs wide. Block Elements
+// does by 18% on a Pixel.
 //
 // This stays the ONLY implementation of the fit arithmetic. The alternative was
 // the viewfinder computing its own min-of-two-constraints, and every geometry
@@ -66,14 +66,44 @@ export function paintArt(pre, lines, geom, boxW, boxH) {
   return { fontSize, width: rect.width, height: rect.height };
 }
 
+// The width the chrome clamps to, from the RESERVED stage box.
+//
+// Added 2026-08-09. Every screen used to publish the measured width of what it
+// had just painted, which made the chrome's width a function of the aspect of
+// the last thing rendered: the action bar and the save sheet changed width on
+// navigation, and again when a received message had an unusual grid.
+//
+// This is stable instead, and it is stable for a structural reason rather than
+// by rounding. The stage box is identical on every picture screen (see
+// --pt-chrome-top / --pt-chrome-bot in tokens.css), and CAPTURE_ASPECT is a
+// fixed constant that every source is cropped to, which a test pins.
+// So min(boxW, boxH * aspect) is the width the art will occupy whichever
+// constraint binds, without needing to know the codec, the column count or the
+// font's advance.
+//
+// It is deliberately NOT the art's measured width. A received message whose
+// grid is not 3:4 will draw narrower or wider than this; the chrome does not
+// follow it, because the chrome's job is to hold still.
+export function stageArtWidth(boxW, boxH, aspect = CAPTURE_ASPECT) {
+  return Math.min(boxW, boxH * aspect);
+}
+
 // Publish the art width so the chrome can clamp to it.
 //
 // Set on the document element rather than passed down, because the action bar
 // lives in .app-bottom, outside the screen container, and a screen may only
 // reach it through ctx.bottomBar. A custom property is the one channel that
 // crosses that boundary without a screen reaching for another element.
+//
+// Rounded, and only written when the rounded value actually changes. Writing a
+// custom property invalidates style for everything that reads it, and this used
+// to be called on every frame of a viewfinder loop.
+let lastPublished = null;
 export function publishArtWidth(width) {
-  document.documentElement.style.setProperty('--pt-art-w', `${Math.round(width)}px`);
+  const px = Math.round(width);
+  if (px === lastPublished || !Number.isFinite(px) || px <= 0) return;
+  lastPublished = px;
+  document.documentElement.style.setProperty('--pt-art-w', `${px}px`);
 }
 
 // Observe a container and repaint when it changes size.

@@ -3,14 +3,17 @@
  * The same screen for a photo you shot, one you picked, and one you received.
  * Everything below is shared. Only the slider and the wording of the fit line
  * differ, and both are handled in JS rather than by a second stylesheet.
+ *
+ * ---------------------------------------------------------------------------
+ * THE FLEX COLUMN IS GONE. 2026-08-09.
+ *
+ * `.sc-view` used to be a flex column with the stage on `flex: 1`, which is
+ * what made the picture move 45px up the screen and shrink 12% between the
+ * viewfinder and here. The layout is now the shell's .app-frame with fixed
+ * bands. Nothing in this file sets a height on the stage, and nothing should.
  */
 
 .sc-view {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-2);
-  padding: var(--pt-space-3) 0;
   position: relative;
 }
 
@@ -32,14 +35,13 @@
 
 /* Art ---------------------------------------------------------------------- */
 
+/* The box is .app-stage in shell.css and identical on every picture screen.
+ *
+ * touch-action: none for the carousel swipe, same reasoning as capture: the
+ * browser would otherwise claim the horizontal drag before pointermove reached
+ * the handler. This route is overflow:hidden, so there is no scrolling to lose. */
 .sc-view-stage {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  background: var(--pt-art-bg);
+  touch-action: none;
 }
 
 .sc-view-art {
@@ -53,6 +55,7 @@
   text-size-adjust: none;
   -webkit-text-size-adjust: none;
   user-select: none;
+  pointer-events: none;   /* the swipe belongs to the stage */
 }
 
 /* Readouts ----------------------------------------------------------------- */
@@ -64,6 +67,7 @@
   width: 100%;
   max-width: var(--pt-art-w);
   margin: 0 auto;
+  padding-top: var(--pt-space-1);
   text-align: center;
   font-size: var(--pt-size-sm);
   color: var(--pt-ink);
@@ -83,30 +87,296 @@
   color: var(--pt-ink-faint);
 }
 
-/* Slider ------------------------------------------------------------------- */
+/* ==========================================================================
+ * SLIDER
+ *
+ * This control was the one real violation of the design system, and it sat
+ * directly under the picture. It was a bare <input type="range"> with
+ * `accent-color` and a height, which on iOS Safari and Android Chrome renders
+ * the PLATFORM slider: a round thumb on a rounded pill track, in an app whose
+ * most-stated rule is
+ *
+ *     One radius, 2px, on everything, including controls that look like they
+ *     want to be round. This is why the shutter is a bar and not a disc.
+ *
+ * So it is rebuilt from the system's own parts: a 1px hairline track, a gold
+ * BAR thumb at 2px radius (a caret, matching the bracket language), a 44px hit
+ * area made of padding rather than of height, and 1px tick marks.
+ *
+ * Two things about styling a range input that are easy to get wrong and are
+ * both load-bearing here:
+ *
+ *   1. -webkit-appearance: none must be set on the INPUT and again on the
+ *      thumb pseudo-element. Setting it only on the input leaves iOS drawing
+ *      its own thumb on our track, which is the worst of both.
+ *   2. The WebKit and Firefox pseudo-elements CANNOT be combined into one
+ *      selector list. An unknown pseudo-element invalidates the whole rule in
+ *      both engines, so a shared block silently applies to neither. They are
+ *      written out twice below. This is not duplication that can be tidied.
+ * ========================================================================== */
+
+.sc-slider {
+  position: relative;
+  flex: none;
+  width: calc(100% - var(--pt-space-5) * 2);
+  max-width: calc(var(--pt-art-w) - var(--pt-space-5) * 2);
+  margin: 0 auto;
+}
+.sc-slider[hidden] { display: none; }
 
 /* Hidden for a received message: it is already encoded and there is nothing to
  * choose. Absent rather than disabled, since a disabled control is
  * low-contrast, shows no tooltip on touch, and implies it could be enabled. */
 .sc-view-slider {
-  flex: none;
-  width: calc(100% - var(--pt-space-5) * 2);
-  max-width: calc(var(--pt-art-w) - var(--pt-space-5) * 2);
-  margin: var(--pt-space-2) auto 0;
-  accent-color: var(--pt-accent);
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  /* The hit area, and it is the whole 44px. The visible track is 1px in the
+   * middle of it; the padding is what your thumb lands on. Growing the height
+   * instead would grow the reserved band, which every other screen is sized
+   * against. */
   height: var(--pt-tap);
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  touch-action: none;
 }
 .sc-view-slider[hidden] { display: none; }
+
+/* Track. A hairline, the same one every structural rule in the app draws
+ * from. */
+.sc-view-slider::-webkit-slider-runnable-track {
+  height: 1px;
+  background: var(--pt-line);
+  border: 0;
+  border-radius: 0;   /* a 1px rule with a radius is a 1px rule */
+}
+.sc-view-slider::-moz-range-track {
+  height: 1px;
+  background: var(--pt-line);
+  border: 0;
+  border-radius: 0;
+}
+
+/* Thumb. A bar, not a disc, and the reason is at the top of this block.
+ *
+ * 3 x 24 is a caret: narrow enough to point at one value on the track rather
+ * than straddle a range of them, tall enough to find with a thumb. The margin
+ * centres it on a 1px track: WebKit positions the thumb from the track's top
+ * edge, so it needs half its own height back. */
+.sc-view-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 3px;
+  height: 24px;
+  margin-top: -12px;
+  background: var(--pt-accent);
+  border: 0;
+  border-radius: var(--pt-radius);
+  cursor: pointer;
+}
+.sc-view-slider::-moz-range-thumb {
+  width: 3px;
+  height: 24px;
+  background: var(--pt-accent);
+  border: 0;
+  border-radius: var(--pt-radius);
+  cursor: pointer;
+}
+
+.sc-view-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--pt-accent-hi); }
+.sc-view-slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--pt-accent-hi); }
+
+/* Ticks -------------------------------------------------------------------- */
+
+/* Device markers, drawn UNDER the track rather than on it, so the thumb passing
+ * over one never hides it.
+ *
+ * See the DEVICE_MARKERS note in compose.js: spec 5.4 asks for four and three
+ * of them are off the end of the slider's range, because the range moved to
+ * characters on 2026-08-09 and the spec was not updated with it. What is drawn
+ * is the one that is in range, plus the range's own endpoints.
+ *
+ * pointer-events: none throughout. These are labels on a control, and a label
+ * that swallows a drag is a control that stops working near its own markings. */
+.sc-slider-ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* The visible track sits at the vertical centre of the 44px input. */
+  top: calc(var(--pt-tap) / 2);
+  height: 0;
+  pointer-events: none;
+}
+
+.sc-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 6px;
+  background: var(--pt-divider);
+  transform: translateX(-0.5px);
+}
+.sc-tick.is-device { background: var(--pt-line); height: 9px; }
+
+.sc-tick-label {
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--pt-size-2xs);
+  letter-spacing: var(--pt-track);
+  line-height: 1;
+  color: var(--pt-ink-faint);
+  white-space: nowrap;
+}
+/* The endpoint labels are bare column counts and sit at the extremes, where a
+ * centred label would run off the track. Pin them inside. */
+.sc-tick:first-child .sc-tick-label { left: 0; transform: none; }
+.sc-tick:last-child .sc-tick-label { left: auto; right: 0; transform: none; }
+
+/* ==========================================================================
+ * CAROUSEL STRIP
+ *
+ * The strip exists to make the swipe discoverable. That is its whole job: a
+ * horizontal drag on a picture is invisible until something on screen implies
+ * there is more than one picture.
+ *
+ * Small on purpose. This is an undo for leaving the app rather than a gallery
+ * (see recents.js, whose argument still holds), and eight 40px thumbnails is
+ * the largest it can be without looking like the History feature that was cut.
+ * ========================================================================== */
+
+.sc-strip {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pt-space-2);
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin: 0 auto;
+  padding: 0 var(--pt-space-3) 2px;
+  overflow-x: auto;
+
+  /* maybe-rain's signature scrollbar, which this app was not using anywhere.
+   * The recents strip hid its scrollbar entirely, which on desktop is a lost
+   * affordance and a lost piece of identity. The 2px border in the background
+   * colour with background-clip: padding-box is what makes a 6px bar read as a
+   * thin gold line rather than as a chunky browser control. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--pt-accent) transparent;
+}
+.sc-strip::-webkit-scrollbar { height: 6px; }
+.sc-strip::-webkit-scrollbar-track { background: transparent; }
+.sc-strip::-webkit-scrollbar-thumb {
+  background: var(--pt-accent);
+  border: 2px solid var(--pt-bg);
+  background-clip: padding-box;
+  border-radius: var(--pt-radius);
+}
+
+.sc-strip-item {
+  position: relative;
+  flex: none;
+}
+
+.sc-strip-thumb {
+  display: block;
+  width: 30px;
+  padding: 0 0 3px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+/* The gold underline, the universal selection idiom in this system. The same
+ * mark the style row uses, for the same reason: it says "this one" without
+ * introducing a second shape. */
+.sc-strip-thumb.is-on { border-bottom-color: var(--pt-accent); }
+
+.sc-strip-box {
+  display: block;
+  height: 40px;
+  overflow: hidden;
+  border-radius: var(--pt-radius);
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  background: var(--pt-art-bg);
+}
+
+.sc-strip-art {
+  margin: 0;
+  white-space: pre;
+  font-family: var(--pt-mono);
+  color: var(--pt-art-ink);
+  font-kerning: none;
+  font-variant-ligatures: none;
+}
+
+/* Delete. The only destructive control in the app.
+ *
+ * Visible rather than behind a long-press, because a long-press is invisible
+ * and an undo cache you cannot prune is not an undo cache. Quiet until you go
+ * near it: faint by default, error-coloured on hover and focus, so it reads as
+ * available rather than as a threat sitting on every thumbnail. */
+.sc-strip-del {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--pt-bg);
+  border: 0;
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-faint);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: color var(--pt-dur-base) ease, opacity var(--pt-dur-base) ease;
+  touch-action: manipulation;
+}
+.sc-strip-del::before {
+  /* 22px visible, 44px target. Same trick as the style row: grow the hit box
+   * with negative insets, never the element, because the element is inside a
+   * band whose height is fixed. */
+  content: '';
+  position: absolute;
+  inset: -11px;
+}
+.sc-strip-del:hover,
+.sc-strip-del:focus-visible { color: var(--pt-error); opacity: 1; }
+
+/* The cap, said out loud, and only once it is in sight. See recents.capNote().
+ * Delete is what makes this mandatory: once there is a delete button the user
+ * believes this is storage, and silent eviction at eight entries is then data
+ * loss rather than an undo cache doing its job. */
+.sc-strip-cap {
+  flex: none;
+  align-self: center;
+  margin: 0 0 0 var(--pt-space-2);
+  font-size: var(--pt-size-2xs);
+  letter-spacing: var(--pt-track);
+  color: var(--pt-ink-faint);
+  white-space: nowrap;
+}
 
 /* Save sheet --------------------------------------------------------------- */
 
 /* Flush, not floating. It sits on the same black plane and dims the picture
  * behind it: no elevation anywhere, surfaces separated by a hairline. */
-.sc-view.is-dimmed > .sc-view-name,
-.sc-view.is-dimmed > .sc-view-stage,
-.sc-view.is-dimmed > .sc-view-fit,
-.sc-view.is-dimmed > .sc-view-chars,
-.sc-view.is-dimmed > .sc-view-slider {
+.sc-view.is-dimmed > .app-chrome-top,
+.sc-view.is-dimmed > .app-stage,
+.sc-view.is-dimmed > .app-chrome-bot {
   filter: brightness(0.3);
   pointer-events: none;
   transition: filter var(--pt-dur-base) ease;

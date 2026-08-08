@@ -1,82 +1,49 @@
-/* Plane Text: the service worker. Written 2026-08-09.
+/* Plane Text: the service worker.
  *
- * This is the file the whole product rests on. Everything else in the app is
- * cosmetic next to it: without a service worker Plane Text is an online web
- * page, and the premise of Plane Text is that you are on an aircraft with a
- * network that passes text and nothing else.
+ * At the repo root, not in app/. A worker's scope is the directory it is served
+ * from, and app/ excludes index.html, so the one navigation that matters would
+ * never be controlled. Service-Worker-Allowed can widen a scope; GitHub Pages
+ * will not send it.
  *
- * ---------------------------------------------------------------------------
- * WHY IT LIVES AT THE ROOT AND NOT IN app/
+ * A classic script, because importScripts() cannot load an ES module and a
+ * module worker needs Safari 16.4+. build-precache.js emits a classic twin of
+ * the manifest for this.
  *
- * A service worker's default scope is the directory it is served from. At
- * app/sw.js the scope is /plane-text/app/, which does not contain index.html,
- * so the shell itself would never be controlled and the one navigation that
- * matters would always hit the network. The Service-Worker-Allowed header can
- * widen a scope; GitHub Pages will not send it. So the file goes beside
- * index.html and tools/build-precache.js excludes it from its own walk.
- *
- * app/main.js registers it as 'sw.js', relative, which resolves against the
- * DOCUMENT's base URL rather than against app/main.js. On GitHub Pages that is
- * /plane-text/sw.js. A leading slash would be /sw.js and 404.
- *
- * ---------------------------------------------------------------------------
- * WHY IT IS A CLASSIC SCRIPT
- *
- * importScripts() cannot load an ES module, and a module service worker needs
- * Safari 16.4+. iOS Safari is the platform this app cannot afford to lose --
- * it is the one with no Web Share Target, so it is already the worst receiving
- * experience, and it is a large share of the people who will install this
- * before a flight. tools/build-precache.js emits two manifests from one walk
- * for exactly this reason; this file reads the classic one.
- *
- * ---------------------------------------------------------------------------
- * WHY IT DOES NOT skipWaiting()
- *
- * The app is a graph of ES modules that import each other by URL. A worker
- * that activates mid-session while the page is running serves the new version
- * of some modules and the cached-in-memory old version of others, and the app
- * runs as a mixture of two builds. That failure is invisible until it is not.
- *
- * So a new worker installs, precaches, and waits. The page is told, and the
- * update lands on the next cold start. This is also what makes "fully cached"
- * and "current" two different states rather than one tick, per the 2026-08-09
- * decision -- and why VERIFY below reports a version string.
+ * It does not skipWaiting on install. The app is a graph of ES modules; a
+ * worker activating mid-session would serve some modules new and some cached
+ * old, running the app as a mixture of two builds.
  */
 
 /* eslint-env serviceworker */
 
 importScripts('app/precache-manifest.classic.js');
 
-// The cache name IS the version. build-precache.js hashes the contents of
-// every listed file, so it changes when any of them changes and only then.
-// A new version therefore means a new cache, and activate deletes the old one.
+// The cache name is the version. build-precache.js hashes file contents, so a
+// new version means a new cache and activate deletes the old one.
 var CACHE = self.PRECACHE_VERSION;
 
-// Absolute URLs, resolved against the worker's own location. Never against
-// '/': the origin root is not the app root on GitHub Pages.
+// Where a shared message waits between the POST and the app reading it. Fixed
+// name so the page can open it without knowing the build version, and exempt
+// from the activate sweep because a share can arrive mid-install.
+var INBOX = 'pt-inbox-v1';
+var INBOX_KEY = 'message';
+
+// Resolved against the worker, never against '/': the origin root is not the
+// app root on GitHub Pages.
 function precacheUrls() {
   return self.PRECACHE.map(function (p) { return new URL(p, self.location).href; });
 }
 
-// The app shell. Every navigation resolves to this, whatever the path, because
-// routing is hash-based and the hash never reaches the server or the worker.
 function shellUrl() {
   return new URL('index.html', self.location).href;
 }
 
-// ---------------------------------------------------------------------------
-// Install: fill the cache, then wait.
+// addAll is atomic: one failed request and the worker never installs. A
+// partially precached app that installs cleanly is the green-tick-that-lies
+// failure the generated manifest exists to prevent.
 //
-// cache.addAll() is atomic -- one failed request rejects the whole thing and
-// the worker never installs. That is the behaviour we want. A partially
-// precached app that installs successfully is the green-tick-that-lies failure
-// build-precache.js exists to prevent, one layer down.
-//
-// The requests are made with cache: 'reload' so a stale HTTP cache entry
-// cannot be promoted into the precache. Without it a file the browser happens
-// to hold from before the deploy is cached under the new version's name, and
-// the version string then describes a build that was never assembled.
-// ---------------------------------------------------------------------------
+// cache: 'reload' stops a stale HTTP entry being promoted into the precache
+// under a version string describing a build that was never assembled.
 self.addEventListener('install', function (event) {
   event.waitUntil(
     caches.open(CACHE).then(function (cache) {
@@ -87,18 +54,12 @@ self.addEventListener('install', function (event) {
   );
 });
 
-// ---------------------------------------------------------------------------
-// Activate: drop every other cache, then take over.
-//
-// Only caches whose name starts with 'pt-' are ours. Deleting anything else
-// would be this app reaching into another app's storage on a shared origin,
-// which github.io very much is.
-// ---------------------------------------------------------------------------
+// Only caches named pt-* are ours. github.io is a shared origin.
 self.addEventListener('activate', function (event) {
   event.waitUntil(
     caches.keys().then(function (names) {
       return Promise.all(names.map(function (name) {
-        if (name !== CACHE && name.indexOf('pt-') === 0) return caches.delete(name);
+        if (name !== CACHE && name !== INBOX && name.indexOf('pt-') === 0) return caches.delete(name);
         return null;
       }));
     }).then(function () {
@@ -107,33 +68,30 @@ self.addEventListener('activate', function (event) {
   );
 });
 
-// ---------------------------------------------------------------------------
-// Fetch.
+// Cache first. Every file the app needs is precached by construction, so a miss
+// on a same-origin GET means either a file nobody ran `npm run precache` for or
+// a request the app does not make. Neither wants a round trip on a cabin
+// network that will hang rather than fail.
 //
-// Cache-first, and for this app that is not a trade-off -- it is the point.
-// Every file the app needs is in the precache by construction, so a cache miss
-// on a same-origin GET means either a file nobody ran `npm run precache` for,
-// or a request the app does not make. Neither wants a network round trip on a
-// cabin network that will hang rather than fail.
-//
-// Three things are deliberately NOT handled here:
-//
-//   - Non-GET. There is no server and nothing to POST to. Pass through.
-//   - Cross-origin. There are no third-party requests; if one appears it is a
-//     bug and it should be visible in the network panel rather than silently
-//     served or silently swallowed.
-//   - Range requests. No media, so no partial responses to get wrong.
-// ---------------------------------------------------------------------------
+// Cross-origin and non-GET pass through. There are no third-party requests; if
+// one appears it should be visible rather than silently served.
 self.addEventListener('fetch', function (event) {
   var request = event.request;
-  if (request.method !== 'GET') return;
-
   var url = new URL(request.url);
+
+  // The share target is a POST (spec 5.5), so this handler is mandatory. A GET
+  // target would put a 15,000 character message in the query string and in
+  // browser history, and a worker ignoring the POST makes sharing do nothing.
+  if (request.method === 'POST' && url.pathname === new URL('share', self.location).pathname) {
+    event.respondWith(receiveShare(request));
+    return;
+  }
+
+  if (request.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;
 
   // A navigation is always the shell. The route lives in the hash, which the
-  // browser never sends, so there is nothing to route on here and nothing that
-  // could need a different document.
+  // browser never sends.
   if (request.mode === 'navigate') {
     event.respondWith(
       caches.match(shellUrl()).then(function (hit) {
@@ -147,34 +105,49 @@ self.addEventListener('fetch', function (event) {
 
   event.respondWith(
     caches.match(request, { ignoreSearch: true }).then(function (hit) {
-      if (hit) return hit;
-      // Not precached. Try the network, and if that fails there is nothing
-      // honest left to return: an opaque or synthesised response would let a
+      // Not precached. Try the network; a synthesised response would let a
       // missing module look like an empty one.
-      return fetch(request);
+      return hit || fetch(request);
     }),
   );
 });
 
-// ---------------------------------------------------------------------------
-// VERIFY: the message the offline readout is built on.
+// Stash the shared text and redirect in.
 //
-// The 2026-08-09 decision is that the readout must verify every precache entry
-// BY NAME, plus one no-network fetch of index.html, and report a version string
-// rather than a tick. Both halves matter and they catch different failures:
+// 303 is what turns the POST into a GET; without it the browser re-issues the
+// POST against the landing URL. A cache rather than postMessage because the
+// share is what launched the app, so there is no client to message yet.
+function receiveShare(request) {
+  var landing = new URL('index.html#/paste', self.location).href;
+  return request.formData().then(function (form) {
+    // `url` is the fallback: some Android share sheets classify a long string
+    // containing a link as a URL, and the wrapper's markup contains one.
+    var text = form.get('text') || form.get('url') || '';
+    if (!text) return null;
+    return caches.open(INBOX).then(function (cache) {
+      return cache.put(INBOX_KEY, new Response(String(text), {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      }));
+    });
+  }).catch(function (err) {
+    // Dropping the payload and opening the Open screen beats a browser error
+    // page.
+    console.error('sw: share target failed', err);
+  }).then(function () {
+    return Response.redirect(landing, 303);
+  });
+}
+
+// VERIFY, which the offline readout is built on.
 //
-//   By name    catches a file that was added to the tree but never precached.
-//              The cache is "full" and the app is broken. This is the failure
-//              a hand-maintained list fails open on.
-//   No-network catches a worker that is installed but not CONTROLLING this
-//              page, which is the state on the very first load before a
-//              reload. The cache is perfect and the app still dies offline,
-//              because nothing is intercepting.
+// Two checks, catching different failures. By name catches a file added to the
+// tree but never precached: the cache is full and the app is broken. The
+// no-network probe catches a worker installed but not controlling, which is the
+// state on the very first load, where the cache is perfect and nothing is
+// intercepting.
 //
-// The second check is a real fetch of the shell with cache: 'only-if-cached'
-// and mode: 'same-origin', which the platform resolves from the HTTP cache or
-// rejects. It never touches the network by construction.
-// ---------------------------------------------------------------------------
+// only-if-cached with mode same-origin resolves from the HTTP cache or rejects,
+// so it never touches the network.
 self.addEventListener('message', function (event) {
   if (!event.data || event.data.type !== 'PT_VERIFY') return;
 
@@ -184,8 +157,7 @@ self.addEventListener('message', function (event) {
   event.waitUntil(
     caches.open(CACHE).then(function (cache) {
       var wanted = self.PRECACHE;
-      var urls = precacheUrls();
-      return Promise.all(urls.map(function (url) {
+      return Promise.all(precacheUrls().map(function (url) {
         return cache.match(url).then(function (hit) { return Boolean(hit); });
       })).then(function (present) {
         var missing = [];
@@ -193,7 +165,7 @@ self.addEventListener('message', function (event) {
         return missing;
       });
     }).then(function (missing) {
-      // The no-network probe. A rejection here is the answer, not an error.
+      // A rejection here is the answer, not an error.
       return fetch(new Request(shellUrl(), { cache: 'only-if-cached', mode: 'same-origin' }))
         .then(function (res) { return { missing: missing, shell: res.ok }; })
         .catch(function () { return { missing: missing, shell: false }; });
@@ -220,10 +192,7 @@ self.addEventListener('message', function (event) {
   );
 });
 
-// The one thing that may activate a waiting worker, and it is the page's call,
-// not this file's. app/main.js sends it when the user asks for the update from
-// the settings screen -- never automatically, for the mixed-build reason at the
-// top of this file.
+// The page's call, from settings, never automatic. See the header.
 self.addEventListener('message', function (event) {
   if (event.data && event.data.type === 'PT_ACTIVATE_UPDATE') self.skipWaiting();
 });

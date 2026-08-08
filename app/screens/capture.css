@@ -9,14 +9,38 @@
  * camera-app style. It was rejected because every dimmed cell is ASCII that was
  * rendered and then thrown away, and because it puts 12px chrome over moving
  * art.
+ *
+ * ---------------------------------------------------------------------------
+ * THE COLUMN IS GONE. 2026-08-09.
+ *
+ * This file used to open with `.sc-capture { display: flex; flex-direction:
+ * column }` and let the stage take `flex: 1`. That is precisely what made the
+ * picture move: the stage was "whatever is left after MY chrome", and the three
+ * picture screens each had different chrome. The layout is now the shell's
+ * .app-frame grid with fixed bands, and this file styles only what goes inside
+ * those bands. Nothing here sets a height on the stage.
  */
 
 .sc-capture {
-  height: 100%;
+  /* The grid itself comes from .app-frame in shell.css. Nothing to add but the
+   * horizontal insets, which the bands inherit. */
+  padding: 0;
+}
+
+/* Top band ----------------------------------------------------------------- */
+
+.sc-top-row {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: var(--pt-space-3);
-  padding: var(--pt-space-3) 0 var(--pt-space-3);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--pt-space-3);
+
+  /* Clamped to the art. The stage below is not: it is the box the art is
+   * measured against, and clamping it would feed back into the fit. */
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin: 0 auto;
 }
 
 /* Style selector ----------------------------------------------------------- */
@@ -26,18 +50,29 @@
 .sc-styles {
   display: flex;
   justify-content: center;
+  align-items: center;
   gap: var(--pt-space-3);
-  padding: 0 var(--pt-space-3);
-  flex: none;
-
-  /* Clamped to the art. The stage below is not: it is the box the art is
-   * measured against, and clamping it would feed back into the fit. */
-  width: 100%;
-  max-width: var(--pt-art-w);
-  margin: 0 auto;
 }
 
+/* The word. 12px type, and a 44px target.
+ *
+ * The row is a readout that happens to be tappable, since the swipe on the
+ * picture is the primary control. That is not a licence to ship a 19px target,
+ * which is what this was: `padding: 4px 2px 3px` on `line-height: 1` at 12px.
+ * actionbar.js throws rather than render a 43px slot, and this was the same
+ * rule broken in the same app on the control touched second-most.
+ *
+ * The hit box grows via a ::before with negative insets rather than by growing
+ * the row, which is maybe-rain's trick for its gesture rails. Growing the row
+ * would push the band taller, and the band is a fixed reserved height that
+ * every other screen is sized against. So the visible word stays 19px and the
+ * thing your thumb hits is 44.
+ *
+ * The pseudo-element is on the button, so it is inside the button's own hit
+ * testing, so no z-index games, and nothing overlaps the picture below since
+ * the band is 44px and the overflow is centred within it. */
 .sc-style {
+  position: relative;
   background: none;
   border: 0;
   border-bottom: 1px solid transparent;
@@ -50,27 +85,67 @@
   line-height: 1;
   cursor: pointer;
   transition: color var(--pt-dur-base) ease;
+  /* Stops a rapid double-tap on a word from zooming the page on iOS, which
+   * fires on a control this small and reads as the app breaking. */
+  touch-action: manipulation;
 }
+
+.sc-style::before {
+  content: '';
+  position: absolute;
+  /* 19px visible, 44px target: 12.5px of reach added above and below. Half the
+   * horizontal gap on each side, so adjacent words tile their hit boxes
+   * without overlapping. */
+  inset: -12.5px calc(var(--pt-space-3) / -2);
+}
+
 .sc-style:hover { color: var(--pt-ink-dim); }
 .sc-style.is-on { color: var(--pt-accent); border-bottom-color: var(--pt-accent); }
 
-/* The viewfinder ----------------------------------------------------------- */
+/* Settings ----------------------------------------------------------------- */
 
-/* min-height:0 lets this shrink inside the flex column instead of pushing the
- * readout off the bottom on a short viewport. */
-.sc-stage {
-  flex: 1 1 auto;
-  min-height: 0;
+/* The one route into settings (spec 5.1). Absolutely positioned so it does not
+ * push the style row off centre: the row is the thing that must be centred on
+ * the art, and a glyph in the corner is a corner glyph. */
+.sc-gear {
+  position: absolute;
+  right: var(--pt-space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--pt-tap);
+  height: var(--pt-tap);
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  background: var(--pt-art-bg);
+  background: none;
+  border: 0;
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-faint);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: color var(--pt-dur-base) ease;
+  touch-action: manipulation;
+}
+.sc-gear:hover { color: var(--pt-ink-dim); }
+
+/* The viewfinder ----------------------------------------------------------- */
+
+/* The box itself is .app-stage in shell.css and is identical on every picture
+ * screen. What this adds is the gesture surface.
+ *
+ * touch-action: none is load-bearing, not a tidy-up. Without it the browser
+ * claims a vertical drag for scrolling before pointermove ever reaches the
+ * style gesture, and the swipe silently does nothing on exactly the devices it
+ * exists for. The screen does not scroll, since .app-screen is overflow:hidden
+ * on this route, so nothing is lost by taking it. */
+.sc-stage {
+  touch-action: none;
 }
 
-/* The art. A CANVAS on this screen, not a <pre> -- see the header of
- * capture.js for why this screen is the exception and compose and paste are
- * not.
+/* The art. A canvas on this screen rather than a <pre>; see the header of
+ * capture.js for why this screen is the exception.
  *
  * Its width and height attributes are device pixels and its CSS width and
  * height are the fitted size; both are set from JS, from the MEASURED advance
@@ -80,15 +155,17 @@
  * image-rendering:pixelated is not a style choice. The backing store is sized
  * at devicePixelRatio so the blit is 1:1, and on a fractional DPR the browser
  * still resamples on the way to the screen. Smoothing that resample softens
- * every glyph edge -- which is precisely the antialiased coverage the atlas
- * exists to preserve (spec 5.7 rule 1), thrown away one step after we went to
- * the trouble of keeping it. */
+ * every glyph edge, which is the antialiased coverage the atlas exists to
+ * preserve (spec 5.7 rule 1), thrown away one step after keeping it. */
 .sc-art {
   display: block;
   margin: 0;
   background: var(--pt-art-bg);
   image-rendering: pixelated;
   user-select: none;
+  /* The gesture lives on the stage, and a pointer that starts on the canvas
+   * must not be intercepted by it. */
+  pointer-events: none;
 }
 
 /* No camera. Not an error layout: declining the permission leaves the library
@@ -113,13 +190,17 @@
   color: var(--pt-ink-faint);
 }
 
-/* Readout ------------------------------------------------------------------ */
+/* Bottom band -------------------------------------------------------------- */
 
+/* Capture's band is mostly empty, and that is the deal: it is sized to the
+ * viewer's contents so the picture above it does not move. The readout sits at
+ * the top of the band, against the picture, where it was before. */
 .sc-readout {
   flex: none;
   width: 100%;
   max-width: var(--pt-art-w);
   margin: 0 auto;
+  padding-top: var(--pt-space-2);
   text-align: center;
   font-size: var(--pt-size-xs);
   color: var(--pt-ink-faint);

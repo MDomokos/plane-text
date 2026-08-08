@@ -137,13 +137,34 @@ export const MIN_ADVANCE_GLYPH_PX = MEASURE_VIEWPORT_PX / 130; // 3.16
 export const RAMP_COLS_MIN = 65;   // legible, and could go lower
 export const RAMP_COLS_MAX = 130;  // "a good top end"
 
-// Which end the slider opens at. Bottom, decided 2026-08-09. The low end is
-// where the artefact is most recognisably text art rather than a grey
-// photograph, and it is the safe end for fit, cost and unknown screens.
-// The cost, stated so it is not rediscovered: the default output is the
-// lowest-resolution one the app can make. Revisit after the first real sends.
-// If the reflex is always to push the slider up, this is wrong.
-export const SIZE_DEFAULT_END = 'min';
+// Which end the slider opens at: 'min' | 'mid' | 'max'.
+//
+// Was 'min', decided earlier on 2026-08-09: the low end is where the artefact
+// is most recognisably text art rather than a grey photograph, and it is the
+// safe end for fit, cost and unknown screens. The note recorded the cost --
+// "the default output is the lowest-resolution one the app can make" -- and set
+// the condition for revisiting: "if the reflex is always to push the slider up,
+// this is wrong."
+//
+// MOVED TO 'mid' LATER THE SAME DAY, and by the condition rather than by taste.
+// The condition was already met before a single real send, from inside the
+// project's own documents: SHELL.md item 10 says a 65-column grid is too coarse
+// to frame with, and 65 is RAMP_COLS_MIN -- so the slider was opening at a size
+// the app's own notes say you cannot judge a picture at. The reflex to push it
+// up was not a prediction; it was written down.
+//
+// 'mid' is the midpoint in COLUMNS, not in characters, and the two are not the
+// same point: cost is quadratic in columns, so bisecting the character range
+// lands at ~103 columns on a 65-130 track while bisecting the column range
+// gives 98. Columns win because columns are what the slider is choosing and
+// what the readout names. A control whose middle is not the middle of the thing
+// it names has to be learned.
+//
+// The new cost, stated as plainly as the old one: the default message is now
+// ~12,969 characters rather than ~5,742. That is 2.3x, and it is still under a
+// fifth of the transport ceiling. If the reflex turns out to be pulling the
+// slider DOWN, this is wrong in the other direction.
+export const SIZE_DEFAULT_END = 'mid';
 
 // Retained for the spec 2.0 arithmetic, which is written in font-size terms.
 export const MIN_LEGIBLE_PX = MIN_ADVANCE_CELL_PX / 0.6; // 6

@@ -24,7 +24,7 @@
 //
 // 2. THE CANVAS REPLACES THE <pre> ON THIS SCREEN ONLY. compose and paste keep
 //    art.js and a real <pre>, because that is the render that proves what the
-//    recipient's font will do -- the advance, the line-height, the shim. That
+//    recipient's font will do: the advance, the line-height, the shim. That
 //    proof belongs where you decide whether to send. Here it is dead weight,
 //    and spec 5.1 asks for a canvas in as many words. The two renderers can
 //    disagree, but only across a navigation, and both take their geometry from
@@ -35,20 +35,60 @@
 //    approximates; the capture is correct (spec 5.8).
 //
 // ---------------------------------------------------------------------------
-// STILL STUBBED: clipboardMayHavePayload(), below, and for a platform reason
-// rather than an effort one.
+// CHANGED 2026-08-09 by the UX review. Each of these reverses something this
+// file previously argued for.
+//
+// A. The screen does not own its layout. It builds the shell's .app-frame and
+//    fills three slots. Every picture screen used to compose its own flex
+//    column, so the art's box was whatever was left after that screen's chrome,
+//    and the picture jumped 45px and shrank 12% between here and the viewer.
+//    See tokens.css --pt-chrome-top / --pt-chrome-bot.
+//
+//    The cost: the viewfinder lost about 80px, because both bands are sized to
+//    the viewer. That is where the height buys least, since you are looking at
+//    a live feed.
+//
+// B. `el.className = 'sc-capture'` is gone. It wiped .app-screen off the
+//    container, making `min-height: 0` and the route's `padding: 0; overflow:
+//    hidden` dead rules. paste.js and compose.js each warn against this and
+//    each cited this file as the example.
+//
+// C. A vertical swipe on the picture cycles style. The row was a 19px target at
+//    4% down the screen, in an app whose actionbar.js throws rather than ship a
+//    43px slot. See app/stylegesture.js.
+//
+// ---------------------------------------------------------------------------
+// The import sub-mode
+//
+// `#/capture?import=1` shows a picked photo instead of a live feed: same stage,
+// same style row, same swipe, shutter reading [ USE ].
+//
+// Spec 5.1 and state.js both give this screen styleId on the grounds that style
+// was chosen at capture. That was false for a library import, because there was
+// no capture: the picker was on `paste` and dropped straight into `compose`, so
+// an imported photo had no moment at which style could be chosen. The two fixes
+// were a style row in compose, making styleId two-owner and the table wrong, or
+// giving the import a capture moment. This is the second.
+//
+// The still wears the camera's interface (openStill() in camera.js), so nothing
+// below branches on the source except the labels, the shutter, and whether the
+// render loop runs.
+//
+// ---------------------------------------------------------------------------
+// STILL STUBBED: clipboardMayHavePayload(), for a platform reason.
 
 import { defineScreen } from '../screen.js';
 import { register } from '../router.js';
 import { currentStyle, currentCols } from '../state.js';
 import { styleList } from '../../src/styles.js';
 import { actionBar } from '../actionbar.js';
-import { autoFit, publishArtWidth } from '../art.js';
-import { currentWord, advanceWord, messageName } from '../words.js';
-import { openCamera, CameraError } from '../camera.js';
+import { autoFit, publishArtWidth, stageArtWidth } from '../art.js';
+import { currentWord, advanceWord } from '../words.js';
+import { openCamera, openStill, CameraError } from '../camera.js';
 import { startViewfinder } from '../viewfinder.js';
 import { clearAtlasCache } from '../atlas.js';
-import { setSubject } from '../pipeline.js';
+import { setSubject, getSubject, clearSubject } from '../pipeline.js';
+import { attachStyleGesture, cycleStyle } from '../stylegesture.js';
 
 // Whether the clipboard is holding one of our messages, which is what puts the
 // gold dot on OPEN.
@@ -57,8 +97,8 @@ import { setSubject } from '../pipeline.js';
 // the clipboard without a user gesture needs the `clipboard-read` permission,
 // which Chromium grants and WebKit does not implement. So the real version is:
 // query the permission, read only if it is already granted, and on Safari
-// return false forever. The dot is an enhancement -- OPEN is always tappable --
-// which is why it is safe to ship as a constant until then.
+// return false forever. The dot is an enhancement, since OPEN is always
+// tappable, so it is safe to ship as a constant until then.
 function clipboardMayHavePayload() {
   return false;
 }
@@ -67,10 +107,9 @@ function clipboardMayHavePayload() {
 //
 // The screen contract says per-visit state goes in closures inside mount(), and
 // everything that can does. These two cannot: unmount() takes no arguments, and
-// a MediaStream and a rAF loop are exactly the things it exists for -- a track
-// has no `signal` option, and a camera left streaming behind a hidden screen
-// holds the sensor and the recording indicator while nothing on screen reports
-// it. One holder, written by mount, cleared by unmount.
+// a MediaStream and a rAF loop are what it exists for. A track has no `signal`
+// option, and a camera left streaming behind a hidden screen holds the sensor
+// and the recording indicator with nothing on screen reporting it.
 let live = null;
 
 export default register(defineScreen({
@@ -80,12 +119,33 @@ export default register(defineScreen({
   async mount(el, ctx) {
     const state = ctx.state;
 
-    el.className = 'sc-capture';
+    // --- which mode ------------------------------------------------------
+    // Both the route parameter and a waiting subject. A reload lands on the
+    // same URL with an empty pipeline, and a frozen screen with no photo is a
+    // black rectangle with a [ USE ] button.
+    const pending = getSubject();
+    const importing = ctx.route.params.import === '1'
+      && Boolean(pending)
+      && pending.kind === 'mine'
+      && Boolean(pending.photo);
 
-    // --- style selector -------------------------------------------------
-    // A segmented control with no box: words with a gold underline on the
-    // active one. Style is an expressive choice and it is chosen first, so it
-    // sits at the top where it is visible and out of the thumb's way.
+    // Build into a child, never onto `el`. See note B in the header.
+    const root = document.createElement('div');
+    root.className = 'sc-capture app-frame';
+    el.append(root);
+
+    // --- top band --------------------------------------------------------
+    const top = document.createElement('div');
+    top.className = 'app-chrome-top sc-top';
+
+    const topRow = document.createElement('div');
+    topRow.className = 'sc-top-row';
+
+    // Words with a gold underline on the active one, no box.
+    //
+    // It stays at the top as a readout that happens to be tappable: the swipe
+    // on the picture is the primary control and this says which style you are
+    // on. Hit area is 44px via ::before insets (capture.css).
     const styles = document.createElement('div');
     styles.className = 'sc-styles';
     styles.setAttribute('role', 'tablist');
@@ -104,16 +164,36 @@ export default register(defineScreen({
       styles.append(b);
     }
 
-    // --- viewfinder -----------------------------------------------------
+    // The route into settings (spec 5.1). All three settings routes were
+    // registered with nothing linking to them, so calibration, the charset
+    // editor, the size test and the offline readout were unreachable.
+    //
+    // Top right: a low-frequency destination you visit deliberately, next to
+    // nothing you can hit by accident.
+    const gear = document.createElement('button');
+    gear.type = 'button';
+    gear.className = 'sc-gear';
+    gear.setAttribute('aria-label', 'Settings');
+    // Brackets, like every other glyph here. A gear would be the only
+    // pictographic icon in a monospace interface and renders differently in
+    // every font stack, without the hero's bar to hold the silhouette.
+    gear.textContent = '[=]';
+
+    topRow.append(styles, gear);
+    top.append(topRow);
+
+    // --- the stage -------------------------------------------------------
+    // Owned by the shell (shell.css .app-stage). The box is identical here and
+    // on compose.
     const stage = document.createElement('div');
-    stage.className = 'sc-stage';
+    stage.className = 'app-stage sc-stage';
     const canvas = document.createElement('canvas');
     canvas.className = 'sc-art';
     // The art is a picture, not text to be read out cell by cell. Same
     // treatment the wrapper gives it, and the same reason a canvas gets a role
     // at all: without one it is an unlabelled graphic.
     canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', 'Live preview');
+    canvas.setAttribute('aria-label', importing ? 'Selected photo' : 'Live preview');
     stage.append(canvas);
 
     // Shown instead of the canvas when there is no camera to show.
@@ -122,7 +202,10 @@ export default register(defineScreen({
     notice.hidden = true;
     stage.append(notice);
 
-    // --- readout --------------------------------------------------------
+    // --- bottom band -----------------------------------------------------
+    const bottom = document.createElement('div');
+    bottom.className = 'app-chrome-bot sc-bottom';
+
     // Secondary by construction (spec 5.2): the character count is information,
     // not a control, and there is no slider on this screen to act on it with.
     // It stays because it is the one number that tells you whether the message
@@ -130,7 +213,15 @@ export default register(defineScreen({
     const readout = document.createElement('p');
     readout.className = 'sc-readout';
 
-    el.append(styles, stage, readout);
+    // Reserves its row whether or not it has text, since the point of the band
+    // above is that nothing moves.
+    const status = document.createElement('p');
+    status.className = 'app-status';
+    status.setAttribute('role', 'status');
+
+    bottom.append(readout, status);
+
+    root.append(top, stage, bottom);
 
     // --- state ----------------------------------------------------------
     let word = currentWord();
@@ -143,6 +234,16 @@ export default register(defineScreen({
     // WebGL is "measure before reaching for it", and this is what measuring
     // looks like on a real handset rather than in an argument.
     const showPerf = ctx.route.params.perf === '1';
+
+    let statusTimer = 0;
+    function say(text, kind = '') {
+      status.textContent = text;
+      status.classList.toggle('is-warn', kind === 'warn');
+      status.classList.toggle('is-error', kind === 'error');
+      clearTimeout(statusTimer);
+      if (text) statusTimer = setTimeout(() => { status.textContent = ''; }, 2600);
+    }
+    ctx.signal.addEventListener('abort', () => clearTimeout(statusTimer), { once: true });
 
     function showNotice(title, body) {
       canvas.hidden = true;
@@ -179,9 +280,9 @@ export default register(defineScreen({
       const cols = stats && stats.cols ? stats.cols : currentCols(s);
 
       let text = `${chars.toLocaleString()} chars · ${cols} cols`;
-      // Only surface degradation once it has actually happened. A frame-rate
-      // readout that is always on trains the user to ignore it.
-      if (stats && stats.degraded) text += ` · ${stats.rungLabel}`;
+      // Only once degradation has happened. An always-on frame-rate readout
+      // trains the user to ignore it. Never on a still.
+      if (!importing && stats && stats.degraded) text += ` · ${stats.rungLabel}`;
       if (showPerf && stats) text += ` · ${stats.meanMs.toFixed(1)}ms @${stats.fps} · ${stats.backend}`;
       // Writing identical text still dirties the node and costs the next frame
       // a layout flush when the viewfinder reads its box.
@@ -191,92 +292,114 @@ export default register(defineScreen({
       }
 
       // The legibility cap warns and does not clamp (2026-08-09). Note this
-      // fires at the top of the slider for both codecs by construction --
-      // SHELL.md disagreement 3 -- so it must read as advice, never as an
+      // fires at the top of the slider for both codecs by construction
+      // (SHELL.md disagreement 3), so it must read as advice rather than an
       // error, or the app cries wolf at its own maximum.
       readout.classList.toggle('is-warn', Boolean(result && result.warnings.length));
 
       if (!heroLabel) heroLabel = bar.hero.querySelector('.pt-hero-label');
-      if (heroLabel && word !== lastWord) {
-        heroLabel.textContent = word;
-        lastWord = word;
+      const heroWord = importing ? 'USE' : word;
+      if (heroLabel && heroWord !== lastWord) {
+        heroLabel.textContent = heroWord;
+        lastWord = heroWord;
       }
     }
 
+    // One path for both modes. The still camera's grabStill() returns the
+    // imported buffer; the live one takes a fresh full-resolution read.
+    async function commit() {
+      if (!camera || !camera.live) return;
+
+      // encode() on the compose side fits the aspect with a focus point and
+      // measures this image's own tone endpoints, not the preview's smoothed
+      // ones. Spec 5.8.
+      const photo = camera.grabStill();
+      if (!photo) return;
+
+      // The clamp is the whole capture feedback: no flash, no sound. Await it
+      // so the screen change lands after the acknowledgement.
+      await bar.fire();
+
+      setSubject({
+        kind: 'mine',
+        photo,
+        // An import keeps the word it came in with, so the name does not
+        // change under the user between the picker and the viewer.
+        word: importing ? pending.word : word,
+        takenAt: importing ? pending.takenAt : Date.now(),
+        source: importing ? 'library' : 'shot',
+      });
+      // The contract's field. The pixels stay out of it; see pipeline.js.
+      state.set({
+        capture: {
+          source: importing ? 'library' : 'shot',
+          width: photo.width,
+          height: photo.height,
+          takenAt: Date.now(),
+        },
+      });
+      // Rotate only after a capture, never on an import. The bar promises a
+      // word, and a promise that changes because you opened a file is not one.
+      if (!importing) word = advanceWord();
+      ctx.navigate('compose');
+    }
+
     // --- action bar -----------------------------------------------------
-    // Leftmost leaves the screen. Capture is the root, so here that means OPEN,
-    // which is a lateral move rather than a back. See actionbar.js.
+    // Leftmost leaves the screen. On capture that is OPEN, a lateral move (see
+    // actionbar.js). The import sub-mode has somewhere back to, so there it is
+    // a real BACK.
     //
-    // 24/76 is a floor, not a preference: at a 390px viewport it puts OPEN on
-    // 48px, and anything above about 80/20 drops it under the tap minimum.
-    // actionbar.js throws if it does.
+    // 24/76 is a floor: at 390px it puts the small slot on 48px, and above
+    // about 80/20 it drops under the tap minimum. actionbar.js throws.
     const bar = actionBar(ctx.bottomBar, [
+      importing
+        ? {
+          label: 'BACK',
+          flex: 24,
+          onTap: () => { clearSubject(); ctx.navigate('paste'); },
+        }
+        : {
+          label: 'OPEN',
+          flex: 24,
+          dot: clipboardMayHavePayload(),
+          onTap: () => ctx.navigate('paste'),
+        },
       {
-        label: 'OPEN',
-        flex: 24,
-        dot: clipboardMayHavePayload(),
-        onTap: () => ctx.navigate('paste'),
-      },
-      {
-        label: word,
-        // The label is a sound, not an instruction, so it is not the
-        // accessible name. A screen reader says "Capture".
-        aria: 'Capture',
+        label: importing ? 'USE' : word,
+        // The label is a sound, so it is not the accessible name. On an
+        // import the word is the instruction and the name matches it.
+        aria: importing ? 'Use this photo' : 'Capture',
         flex: 76,
         hero: true,
-        onTap: async () => {
-          // No camera means no shot. The library is the way out and OPEN is
-          // already offering it, so this does nothing rather than pretending.
-          if (!camera || !camera.live) return;
-
-          // The still, at full sensor resolution and uncropped. encode() on the
-          // compose side does the aspect fit with a focus point and measures
-          // this image's own tone endpoints -- NOT the preview's smoothed ones.
-          // "The preview approximates; the capture is correct" (spec 5.8).
-          const photo = camera.grabStill();
-          if (!photo) return;
-
-          // The clamp is the whole capture feedback -- there is no flash over
-          // the frame and no shutter sound. Await it so the screen change lands
-          // after the acknowledgement rather than on top of it.
-          await bar.fire();
-
-          setSubject({
-            kind: 'mine',
-            photo,
-            word,
-            takenAt: Date.now(),
-            source: 'shot',
-          });
-          // The contract's own field, kept accurate for anyone who reads it.
-          // The pixels are not in here on purpose; see pipeline.js.
-          state.set({
-            capture: { source: 'shot', width: photo.width, height: photo.height, takenAt: Date.now() },
-          });
-          // Rotate only after a capture is actually taken. The bar is promising
-          // a word, and a promise that changes because you looked at it is not
-          // one.
-          word = advanceWord();
-          ctx.navigate('compose');
-        },
+        onTap: commit,
       },
     ], { signal: ctx.signal });
 
-    // --- the camera -----------------------------------------------------
-    try {
-      camera = await openCamera({ host: el });
-    } catch (err) {
-      cameraError = err instanceof CameraError ? err : new CameraError('failed', String(err));
+    // --- the source -----------------------------------------------------
+    if (importing) {
+      try {
+        camera = openStill(pending.photo);
+      } catch (err) {
+        cameraError = err instanceof CameraError ? err : new CameraError('failed', String(err));
+      }
+    } else {
+      try {
+        camera = await openCamera({ host: el });
+      } catch (err) {
+        cameraError = err instanceof CameraError ? err : new CameraError('failed', String(err));
+      }
     }
 
-    // The router honours a navigation that happened during the await and
-    // discards the late mount -- but it cannot know about a camera we opened in
-    // the meantime, and that camera would stream forever behind a screen that
-    // no longer exists.
+    // The router discards a late mount, but it cannot know about a camera
+    // opened during the await, which would stream on behind a dead screen.
     if (ctx.signal.aborted) {
       if (camera) camera.stop();
       return;
     }
+
+    // From the reserved stage box, not the last painted rect, so the action
+    // bar and style row stop resizing on navigation. See art.js.
+    const publish = (w, h) => publishArtWidth(stageArtWidth(w, h));
 
     if (cameraError) {
       // Spec 8: declining the camera is not a dead end. The library is the way
@@ -287,7 +410,7 @@ export default register(defineScreen({
         : 'You can still open a photo from your library — the button below on the left.';
       showNotice(cameraError.message, body);
       render(null);
-      publishArtWidth(stage.getBoundingClientRect().width);
+      autoFit(stage, publish, { signal: ctx.signal });
     } else {
       vf = startViewfinder({
         camera,
@@ -298,32 +421,51 @@ export default register(defineScreen({
         onStats: (stats) => render(stats),
       });
 
-      // Re-fit on rotate, on the URL bar collapsing, on a desktop window drag.
-      // The loop already re-fits every frame, so this matters on the static
-      // rung and on the very first paint, where it is the thing that publishes
-      // the art width the chrome clamps itself to.
-      autoFit(stage, () => {
+      // A still does not loop. Without this the ladder reports "coarse" about
+      // a picture that never moved, and the app re-encodes it 20 times a
+      // second. See viewfinder.freeze().
+      if (importing) vf.freeze();
+
+      // Rotate, URL bar collapse, window drag. The live loop re-fits every
+      // frame anyway; this covers the static rung, the frozen path and the
+      // first paint.
+      autoFit(stage, (w, h) => {
+        publish(w, h);
         const shot = vf.refresh();
-        if (shot) publishArtWidth(shot.cols * shot.atlas.cellW);
+        if (importing && shot) render({ result: shot.result, cols: shot.cols });
       }, { signal: ctx.signal });
     }
 
     live = { camera, vf };
 
-    // Re-render whenever anything the encode depends on moves. sizeChars is
-    // compose's field, but it is read here because the readout has to agree
-    // with what compose will produce -- if they disagree the user learns the
-    // number changes when they navigate, which reads as a bug.
+    // --- style, by swipe -------------------------------------------------
+    // On the picture, vertical, capture only. See app/stylegesture.js.
+    attachStyleGesture(stage, {
+      signal: ctx.signal,
+      onCycle: (n) => {
+        const next = cycleStyle(state.get(), styleList(), n);
+        if (next === state.get().styleId) return;
+        state.set({ styleId: next });
+        // Named out loud. The style row is at the top of the screen, which
+        // is not where the eye is during a gesture.
+        say(currentStyle(state.get()).name.toUpperCase());
+      },
+    });
+
+    // sizeChars is compose's field, read here so the readout agrees with what
+    // compose will produce. A number that changes on navigation reads as a bug.
     //
-    // The loop picks all of these up on its next frame by itself; refresh() is
-    // called so a style tap repaints on the tap rather than up to 80ms later,
-    // and so the static rung updates at all.
+    // The loop would pick these up next frame; refresh() makes a style tap
+    // repaint on the tap, and is the only thing that updates the static and
+    // frozen rungs.
     state.subscribe((_s, changed) => {
       if (changed.has('styleId') || changed.has('sizeChars') || changed.has('customCharsets') || changed.has('invert')) {
-        if (vf) vf.refresh();
-        render(vf ? { result: vf.latest && vf.latest.result, cols: vf.latest && vf.latest.cols } : null);
+        const shot = vf ? vf.refresh() : null;
+        render(shot ? { result: shot.result, cols: shot.cols } : null);
       }
     }, { signal: ctx.signal });
+
+    gear.addEventListener('click', () => ctx.navigate('settings'), { signal: ctx.signal });
 
     render(null);
   },
@@ -333,9 +475,9 @@ export default register(defineScreen({
     if (!live) return;
     if (live.vf) live.vf.stop();
     if (live.camera) live.camera.stop();
-    // Atlases are per font size, and the next visit will very likely mount at a
-    // different one. Holding a few megabytes of canvas for a screen nobody is
-    // looking at is the same class of leak as the stream itself.
+    // Atlases are per font size and the next visit will likely differ.
+    // Holding megabytes of canvas for a hidden screen is the same leak as the
+    // stream.
     clearAtlasCache();
     live = null;
   },

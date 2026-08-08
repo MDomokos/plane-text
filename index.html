@@ -38,6 +38,7 @@
 <link rel="stylesheet" href="app/screens/capture.css">
 <link rel="stylesheet" href="app/screens/paste.css">
 <link rel="stylesheet" href="app/screens/compose.css">
+<link rel="stylesheet" href="app/screens/settings.css">
 </head>
 <body>
 
@@ -55,6 +56,14 @@
 <!-- Bottom bar slot. Cleared before every mount. The screen fills it via
      ctx.bottomBar, or leaves it empty and it collapses. -->
 <nav class="app-bottom" id="app-bottom" aria-label="Screen actions"></nav>
+
+<!-- Route announcements. Written only by app/main.js's afterMount hook, never
+     by a screen: a screen that needs to say something transient uses its own
+     status line in the bottom chrome band (see compose.js).
+
+     Visually hidden rather than display:none, because a display:none live
+     region is not announced at all. -->
+<div class="app-live" id="app-live" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <script type="module" src="app/main.js"></script>
 </body>

@@ -36,16 +36,10 @@
 import { defineScreen } from '../screen.js';
 import { register } from '../router.js';
 import { actionBar } from '../actionbar.js';
-import { paintArt } from '../art.js';
 import { messageName, currentWord } from '../words.js';
 import * as recents from '../recents.js';
-import { decodeMessage, looksLikeMessage, setSubject } from '../pipeline.js';
-import { currentStyle } from '../state.js';
-
-// Thumbnail geometry. Small, and not a preview: at this size a grid of ramp
-// glyphs reads as texture, and you recognise an entry by its shape and its name
-// rather than by seeing the picture. That is why every thumbnail is labelled.
-const THUMB_COLS = 18;
+import { paintThumb } from '../thumb.js';
+import { decodeMessage, looksLikeMessage, setSubject, takeSharedText } from '../pipeline.js';
 
 // Longest edge a picked photo is decoded at.
 //
@@ -234,7 +228,17 @@ export default register(defineScreen({
           takenAt: Date.now(),
           source: 'library',
         });
-        ctx.navigate('compose');
+        // Through capture, not straight to the viewer. Changed 2026-08-09.
+        //
+        // Spec 5.1 and state.js justify the composer having no style picker
+        // with "style was chosen at capture". That was false for an imported
+        // photo: this picker dropped the user into `compose`, so a library
+        // import had no moment at which style could be chosen.
+        //
+        // `?import=1` puts capture into its frozen sub-mode. The alternative
+        // was a style row in the viewer, which would make styleId a two-owner
+        // field and the ownership table wrong.
+        ctx.navigate('capture', { import: '1' });
       } catch (err) {
         // HEIC is the case worth naming: iOS shoots it by default, and Chrome
         // and Firefox cannot decode it, so createImageBitmap rejects on a file
@@ -245,18 +249,49 @@ export default register(defineScreen({
       }
     }, { signal: ctx.signal });
 
+    // The strip. Changed 2026-08-09:
+    //
+    //   1. The label and an empty state always render. This returned early on
+    //      an empty list, so on first run the feature did not exist until it
+    //      silently appeared one day.
+    //   2. Every entry has a delete control. See recents.js for why delete
+    //      forces the cap to become visible.
+    //   3. Thumbnails come from app/thumb.js, shared with the carousel.
     function renderRecents() {
       recentWrap.replaceChildren();
       const list = recents.list();
-      if (!list.length) return;
 
       const label = document.createElement('p');
       label.className = 'sc-recent-label';
       label.textContent = 'RECENT';
+
+      const note = recents.capNote(list.length);
+      if (note) {
+        const cap = document.createElement('span');
+        cap.className = 'sc-recent-cap';
+        cap.textContent = note;
+        label.append(' ', cap);
+      }
+
+      recentWrap.append(label);
+
+      if (!list.length) {
+        // Phrased as what the strip is for rather than "nothing here", so a
+        // first-time user learns it exists before they have anything in it.
+        const empty = document.createElement('p');
+        empty.className = 'sc-recent-empty';
+        empty.textContent = 'Pictures you open or take appear here, so you can get back to them without pasting again.';
+        recentWrap.append(empty);
+        return;
+      }
+
       const strip = document.createElement('div');
       strip.className = 'sc-recent-strip';
 
       for (const entry of list) {
+        const wrap = document.createElement('div');
+        wrap.className = 'sc-thumb-wrap';
+
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'sc-thumb';
@@ -278,34 +313,37 @@ export default register(defineScreen({
 
         item.append(box, name);
         item.addEventListener('click', () => openMessage(entry.message, entry.name), { signal: ctx.signal });
-        strip.append(item);
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'sc-thumb-del';
+        del.setAttribute('aria-label', `Delete ${entry.name}`);
+        del.textContent = '×';
+        del.addEventListener('click', (e) => {
+          e.stopPropagation();
+          recents.remove(entry.name);
+          renderRecents();
+        }, { signal: ctx.signal });
+
+        wrap.append(item, del);
+        strip.append(wrap);
 
         // Draw after layout, so the box has a measured size to fit into.
-        requestAnimationFrame(() => {
-          const decoded = decodeMessage(entry.message);
-          if (!decoded) return;
-          const r = box.getBoundingClientRect();
-          if (!r.width || !r.height) return;
-          // Sample the full grid down to a strip-sized one. Crude
-          // nearest-neighbour, and honest about what a thumbnail is here: a
-          // shape, not a preview.
-          const src = decoded.rows;
-          const step = Math.max(1, Math.floor(src[0].length / THUMB_COLS));
-          const rows = src
-            .filter((_l, i) => i % step === 0)
-            .map((line) => [...line].filter((_c, i) => i % step === 0).join(''));
-          paintArt(pre, rows, {
-            codec: decoded.codec ?? currentStyle(ctx.state.get()).codec,
-            cols: rows[0]?.length || THUMB_COLS,
-            rows: rows.length,
-          }, r.width, r.height);
-        });
+        requestAnimationFrame(() => paintThumb(pre, entry.message, box, ctx.state.get()));
       }
 
-      recentWrap.append(label, strip);
+      recentWrap.append(strip);
     }
 
     renderRecents();
+
+    // A share-target launch. Consumed here rather than in main.js because the
+    // decode can fail and this screen knows how to say so.
+    //
+    // Deferred a tick so the screen renders first: openMessage() navigates on
+    // success, and the error path needs somewhere to draw if it does not.
+    const incoming = takeSharedText();
+    if (incoming) queueMicrotask(() => { if (!ctx.signal.aborted) openMessage(incoming); });
 
     // Action bar. Leftmost leaves the screen, and here it is a real back:
     // capture is where you came from.

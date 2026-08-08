@@ -39,6 +39,31 @@ export function clearSubject() {
   subject = null;
 }
 
+// The Web Share Target hand-off. Added 2026-08-09.
+//
+// The manifest declares a POST share target (spec 5.5). sw.js takes the body,
+// stashes it and redirects; main.js reads the stash and puts it here. iOS
+// cannot have any of this, since Safari does not implement Web Share Target,
+// which is the argument for Android having it: without it, receiving on Android
+// costs the same copy, switch app, paste as iOS, for no reason.
+//
+// Here rather than in the router because a share is a message arriving, and
+// this module is where messages arrive from.
+//
+// Taken rather than read, so it is consumed once. A launch payload that
+// survives re-opens somebody's photograph on the next navigation.
+let shared = null;
+
+export function setSharedText(text) {
+  shared = typeof text === 'string' && text ? text : null;
+}
+
+export function takeSharedText() {
+  const out = shared;
+  shared = null;
+  return out;
+}
+
 // Encode a photo at the current style and size.
 //
 // Every option is read from the store or resolved from src/. currentCols() is

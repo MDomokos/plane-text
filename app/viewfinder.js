@@ -106,6 +106,18 @@ export function startViewfinder({
   let last = 0;
   let paused = false;
 
+  // Frozen is not paused, and the two must not share a flag.
+  //
+  // `paused` is the platform's business: the tab went away, come back when it
+  // returns. `frozen` is the caller's: this source is a still, so there is
+  // nothing to loop over. Added 2026-08-09 with the import sub-mode, where
+  // capture shows a picked photo through this same renderer.
+  //
+  // Sharing one flag would mean the visibilitychange handler un-freezing a
+  // still every time the app came to the foreground, and a frozen viewfinder
+  // quietly burning a 20fps encode loop on an image that cannot change.
+  let frozen = false;
+
   // --- the drawing surface ------------------------------------------------
   //
   // WebGL where it exists, the 2D atlas blit where it does not. Measured, the
@@ -326,7 +338,7 @@ export function startViewfinder({
     schedule();
 
     const cfg = LADDER[rung];
-    if (paused || cfg.fps === 0) return;
+    if (paused || frozen || cfg.fps === 0) return;
     if (busy) return;
 
     const interval = 1000 / cfg.fps;
@@ -430,7 +442,14 @@ export function startViewfinder({
     // The live canvas, which is NOT necessarily the one the caller passed in:
     // a lost GL context is recovered by putting a fresh element in its place.
     get canvas() { return surface; },
-    get isStatic() { return LADDER[rung].fps === 0; },
+    // Stop looping. The caller drives with refresh() from here on.
+    //
+    // Used by capture's frozen sub-mode, where the source is a picked photo.
+    // The loop would otherwise re-encode an unchanging image twenty times a
+    // second and, worse, the degradation ladder would start stepping down on a
+    // still -- reporting "coarse" about a picture that was never moving.
+    freeze() { frozen = true; },
+    get isStatic() { return frozen || LADDER[rung].fps === 0; },
     get rung() { return rung; },
     get rungLabel() { return LADDER[rung].label; },
     get meanFrameMs() { return meanFrameMs(); },

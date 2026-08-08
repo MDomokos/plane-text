@@ -51,15 +51,48 @@ test('the size range is in characters, shared by every codec', async () => {
   // because rows scale with columns so cost is quadratic. This test pins the
   // direction of that trade, not just the numbers.
   const { sizeRange, charsForCols } = await import('../src/sizing.js');
+  const { SIZE_DEFAULT_END, RAMP_COLS_MIN, RAMP_COLS_MAX } = await import('../src/constants.js');
   const r = sizeRange();
   assert.equal(r.minChars, charsForCols(CODEC.RAMP, 65), 'low end is the measured ramp floor');
   assert.equal(r.maxChars, charsForCols(CODEC.RAMP, 130), 'high end is the measured ramp cap');
-  assert.equal(r.defaultChars, r.minChars, 'the slider opens at the bottom');
+
+  // Where the slider opens. Pinned against the CONSTANT rather than against a
+  // literal, so moving the decision is a one-line change in constants.js
+  // instead of a hunt through the tests -- but the consequences below are still
+  // pinned as numbers, because those are what the decision is a decision about.
+  assert.equal(
+    r.defaultChars,
+    { min: r.minChars, mid: r.midChars, max: r.maxChars }[SIZE_DEFAULT_END],
+    'the slider opens at the documented end',
+  );
+
+  // The midpoint is taken in COLUMNS, and the two midpoints are not the same
+  // point. Characters go as roughly the SQUARE of columns, so the column
+  // midpoint maps to fewer characters than the character midpoint does: 98
+  // columns against 103. The column one is the honest middle, because columns
+  // are what the user is choosing and what the readout names.
+  //
+  // This pins the direction as well as the value. Asserting only the equality
+  // below would still pass if someone "simplified" it to (min+max)/2 on a range
+  // where the two happened to be close.
+  assert.equal(r.midChars, charsForCols(CODEC.RAMP, Math.round((RAMP_COLS_MIN + RAMP_COLS_MAX) / 2)));
+  assert.ok(
+    r.midChars < (r.minChars + r.maxChars) / 2,
+    `the column midpoint must land below the character midpoint, because cost is quadratic in columns (got ${r.midChars} against ${(r.minChars + r.maxChars) / 2})`,
+  );
+
+  // The default must clear the "cannot frame with it" floor. SHELL.md item 10
+  // says a 65-column grid is too coarse to judge a picture at, and 65 is
+  // RAMP_COLS_MIN -- which is what retired 'min' as the opening end.
+  assert.ok(
+    defaultCols(CODEC.RAMP) > RAMP_COLS_MIN,
+    `the slider must not open at the floor SHELL.md says you cannot frame with (got ${defaultCols(CODEC.RAMP)})`,
+  );
 
   // Same characters, different geometry, per codec.
-  assert.equal(defaultCols(CODEC.RAMP), 65);
-  assert.equal(defaultCols(CODEC.BRAILLE), 92);
-  assert.equal(defaultCols(CODEC.QUADRANT), 65);
+  assert.equal(defaultCols(CODEC.RAMP), 98);
+  assert.equal(defaultCols(CODEC.BRAILLE), 139);
+  assert.equal(defaultCols(CODEC.QUADRANT), 98);
 
   // The invariant itself: a codec swap must not move the character count by
   // more than one row's worth of rounding.
@@ -67,8 +100,8 @@ test('the size range is in characters, shared by every codec', async () => {
   for (const codec of [CODEC.BRAILLE, CODEC.QUADRANT, CODEC.RAMP]) {
     const cost = cf(codec, defaultCols(codec));
     assert.ok(
-      Math.abs(cost - r.minChars) / r.minChars < 0.02,
-      `codec ${codec} costs ${cost} against a ${r.minChars} target`,
+      Math.abs(cost - r.defaultChars) / r.defaultChars < 0.02,
+      `codec ${codec} costs ${cost} against a ${r.defaultChars} target`,
     );
   }
 });
@@ -1502,9 +1535,11 @@ test('the shell derives columns from src/sizing and never stores them', async ()
   const { sizeRange, defaultCols } = await import('../src/sizing.js');
   const store = createStore();
 
-  // The slider is in characters and opens at the bottom (2026-08-09).
+  // The slider is in characters, and it opens wherever SIZE_DEFAULT_END says.
+  // The store must not have its own opinion about that -- this asserts it takes
+  // the number from src/sizing rather than carrying a copy.
   assert.equal(store.get().sizeChars, sizeRange().defaultChars);
-  assert.equal(store.get().sizeChars, sizeRange().minChars);
+  assert.equal(store.get().sizeChars, sizeRange().midChars);
   assert.equal(store.get().styleId, 'art');
   assert.ok(!('cols' in store.get()), 'columns are derived, never stored');
   assert.ok(!('codec' in store.get()), 'the codec follows from the style');
@@ -1513,7 +1548,7 @@ test('the shell derives columns from src/sizing and never stores them', async ()
   // characters-not-columns decision exists to keep.
   assert.equal(currentCols(store.get()), defaultCols(CODEC.RAMP));
   store.set({ styleId: 'halftone' });
-  assert.equal(store.get().sizeChars, sizeRange().minChars, 'a style swap must not move the size');
+  assert.equal(store.get().sizeChars, sizeRange().defaultChars, 'a style swap must not move the size');
   assert.equal(currentCols(store.get()), defaultCols(CODEC.BRAILLE));
   assert.equal(currentStyle(store.get()).codec, CODEC.BRAILLE);
 
@@ -1691,4 +1726,289 @@ test('a dot-resolution preview buffer round-trips its own geometry', async () =>
       assert.equal(out.lines.length, rows);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// The 2026-08-09 UX review. Each test below pins a fix to the finding that
+// caused it, so a later change that undoes one fails with the reason attached
+// rather than with a bare number.
+// ---------------------------------------------------------------------------
+
+test('the service worker exists, is at the root, and is not precached', async () => {
+  // The review's blocking finding: sw.js did not exist. precache-manifest.js
+  // was generated and nothing consumed it, so the premise of the whole product
+  // -- offline, on a plane -- was unimplemented and the app was a web page.
+  const { readFileSync, existsSync } = await import('node:fs');
+  const swUrl = new URL('../sw.js', import.meta.url);
+  assert.ok(existsSync(swUrl), 'sw.js must exist');
+
+  const sw = readFileSync(swUrl, 'utf8');
+  const { PRECACHE } = await import('../app/precache-manifest.js');
+
+  // At the ROOT, not in app/. A worker served from app/ has scope app/, which
+  // does not contain index.html, so the one navigation that matters would never
+  // be controlled. GitHub Pages will not send Service-Worker-Allowed.
+  assert.ok(!PRECACHE.includes('sw.js'), 'a worker must not precache itself');
+  assert.ok(!PRECACHE.includes('app/sw.js'), 'sw.js does not live in app/');
+
+  // It must consume the generated manifest rather than carry its own list. A
+  // hand-maintained list fails OPEN on an added file: everything verifies, the
+  // readout goes green, and the app dies behind a captive portal.
+  assert.match(sw, /importScripts\(['"]app\/precache-manifest\.classic\.js['"]\)/);
+  assert.match(sw, /self\.PRECACHE\b/);
+
+  // Relative resolution. A leading slash is the origin root, which is not the
+  // app root on GitHub Pages.
+  assert.match(sw, /new URL\(p, self\.location\)/);
+  assert.ok(!/caches\.match\(['"]\//.test(sw), 'nothing may resolve against the origin root');
+
+  // It must NOT skipWaiting on install. The app is a graph of ES modules; a
+  // worker that activates mid-session serves some modules new and some cached
+  // old, and the app runs as a mixture of two builds.
+  const installBlock = sw.slice(sw.indexOf("addEventListener('install'"), sw.indexOf("addEventListener('activate'"));
+  assert.ok(!/skipWaiting/.test(installBlock), 'install must not skipWaiting');
+  assert.match(sw, /PT_ACTIVATE_UPDATE/, 'the page must be able to ask for the update deliberately');
+
+  // The share target is a POST, per spec 5.5, and that makes this handler
+  // mandatory rather than an optimisation: a GET target would put a
+  // 15,000-character message in the query string and in browser history, and a
+  // worker that ignored the POST would make sharing silently do nothing.
+  const manifest = JSON.parse(readFileSync(new URL('../manifest.webmanifest', import.meta.url), 'utf8'));
+  assert.equal(manifest.share_target.method, 'POST');
+  assert.equal(manifest.share_target.enctype, 'multipart/form-data');
+  assert.ok(!/^\//.test(manifest.share_target.action), 'the action must be relative, for the sub-path');
+  assert.match(sw, /request\.method === 'POST'/, 'the worker must handle the share POST');
+  assert.match(sw, /formData\(\)/);
+  // 303 is what turns the POST into a GET. Without it the browser re-issues
+  // the POST against the landing URL.
+  assert.match(sw, /Response\.redirect\([^)]*303\)/);
+  // The inbox must survive an activate sweep: a share can arrive while a new
+  // worker is installing.
+  assert.match(sw, /name !== INBOX/);
+});
+
+test('the offline readout reports a version string, never a bare tick', async () => {
+  // The 2026-08-09 decision, which the review found unimplemented: silent
+  // update-on-load means "fully cached" and "current" are different states, and
+  // one tick cannot say both.
+  const { offlineLabel } = await import('../app/offline.js');
+
+  assert.equal(offlineLabel({ state: 'unsupported' }), 'no offline');
+  assert.equal(offlineLabel({ state: 'caching' }), 'caching…');
+  assert.equal(offlineLabel({ state: 'incomplete', missing: ['app/x.js', 'app/y.js'] }), 'offline: 2 missing');
+  // Ready is the only state allowed to show a version, and it shows the version
+  // rather than the word "ready".
+  assert.equal(offlineLabel({ state: 'ready', version: 'pt-abc123' }), 'pt-abc123');
+  assert.equal(offlineLabel({ state: 'ready', version: 'pt-abc123', update: true }), 'pt-abc123 · update ready');
+});
+
+test('the stage is reserved by the shell, so the picture cannot move between screens', async () => {
+  // The review's §1, measured: the art moved 45px up and shrank 12% between
+  // capture and the viewer, because each screen composed its own flex column
+  // and the stage was "whatever is left after MY chrome".
+  const { readFileSync } = await import('node:fs');
+  const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+
+  const tokens = read('app/tokens.css');
+  assert.match(tokens, /--pt-chrome-top:\s*\d+px/);
+  assert.match(tokens, /--pt-chrome-bot:\s*\d+px/);
+
+  // The grid lives in the shell and uses both bands with 1fr between them.
+  const shell = read('app/shell.css');
+  assert.match(shell, /\.app-frame\s*\{[^}]*grid-template-rows:\s*var\(--pt-chrome-top\)\s+1fr\s+var\(--pt-chrome-bot\)/s);
+
+  // And no picture screen may reintroduce a column that sizes the stage. This
+  // is the actual regression to guard: the bug comes back the moment someone
+  // adds `flex: 1` to a stage again.
+  for (const p of ['app/screens/capture.css', 'app/screens/compose.css']) {
+    const css = read(p);
+    assert.ok(!/\.(sc-stage|sc-view-stage)\s*\{[^}]*flex:\s*1/s.test(css), `${p}: the stage must not size itself`);
+    assert.ok(!/\.(sc-capture|sc-view)\s*\{[^}]*flex-direction:\s*column/s.test(css), `${p}: the screen must not own the column`);
+  }
+
+  // Both picture screens build the shell's frame rather than their own.
+  for (const p of ['app/screens/capture.js', 'app/screens/compose.js']) {
+    assert.match(read(p), /className = '[\w-]+ app-frame'/, `${p}: must build .app-frame`);
+  }
+
+  // The capture screen must not wipe .app-screen off the container. It did,
+  // which made `.app-screen { min-height: 0 }` and the route's `padding: 0;
+  // overflow: hidden` dead rules -- and both compose.js and paste.js carried a
+  // comment citing capture.js as the example of the mistake.
+  // Comments stripped first: this file's own header quotes the old line while
+  // explaining why it is gone, and a grep that cannot tell code from prose is a
+  // grep that fails the moment someone documents the fix.
+  const captureCode = read('app/screens/capture.js')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/\bel\.className\s*=/.test(captureCode), 'capture must build into a child');
+});
+
+test('the art width is derived from the reserved box, so the chrome cannot breathe', async () => {
+  // --pt-art-w used to be the MEASURED width of the last thing painted, so the
+  // action bar, the style row and the save sheet all resized on navigation.
+  const { stageArtWidth } = await import('../app/art.js');
+  const { CAPTURE_ASPECT } = await import('../src/constants.js');
+
+  // Height-bound (a phone): the art is as wide as the aspect allows.
+  assert.equal(stageArtWidth(390, 400), 400 * CAPTURE_ASPECT);
+  // Width-bound (a tall stage): the box wins.
+  assert.equal(stageArtWidth(390, 900), 390);
+
+  // The property that matters: it depends on the BOX only. Two different
+  // pictures in the same box must produce the same chrome width, which is what
+  // stops a received message with an unusual grid resizing the action bar.
+  assert.equal(stageArtWidth(390, 538), stageArtWidth(390, 538));
+});
+
+test('a style swipe wraps, survives a deleted charset, and matches the row order', async () => {
+  // The review's §2: the style row was a 19px target at 4% down the screen --
+  // the worst reach on the device -- in an app whose actionbar.js throws rather
+  // than ship a 43px slot.
+  const { cycleStyle, styleOrder } = await import('../app/stylegesture.js');
+  const { styleList } = await import('../src/styles.js');
+
+  const builtIn = styleList();
+  const base = { styleId: builtIn[0].id, customCharsets: [] };
+
+  // The gesture walks the same order the row renders, or "next" means two
+  // different things depending on which control you used.
+  assert.deepEqual(styleOrder(base, builtIn), builtIn.map((s) => s.id));
+
+  assert.equal(cycleStyle(base, builtIn, 1), builtIn[1].id);
+  // Wrapping, both ways. Clamping at either end reads as a dead gesture when
+  // there are only three or four styles.
+  assert.equal(cycleStyle({ ...base, styleId: builtIn[builtIn.length - 1].id }, builtIn, 1), builtIn[0].id);
+  assert.equal(cycleStyle(base, builtIn, -1), builtIn[builtIn.length - 1].id);
+
+  // Custom charsets are on the same ring, after the built-ins.
+  const withCustom = { styleId: builtIn[builtIn.length - 1].id, customCharsets: [{ id: 'mine', name: 'Mine', ramp: ' .:#' }] };
+  assert.equal(cycleStyle(withCustom, builtIn, 1), 'mine');
+
+  // A deleted charset must not brick the gesture, the same way currentStyle()
+  // falls back rather than throwing.
+  assert.equal(cycleStyle({ ...base, styleId: 'gone' }, builtIn, 1), builtIn[1].id);
+});
+
+test('recents can be pruned, updated in place, and states its own cap', async () => {
+  // The review's §6b: once there is a delete button the user believes this is
+  // storage, and eight entries with SILENT eviction is then a data-loss bug
+  // rather than an undo cache.
+  const recents = await import('../app/recents.js');
+
+  // capNote is silent until the cap is in sight -- a warning that is always on
+  // is a warning nobody reads.
+  assert.equal(recents.capNote(1), '');
+  assert.equal(recents.capNote(recents.MAX - 1), '');
+  assert.match(recents.capNote(recents.MAX), new RegExp(`${recents.MAX} of ${recents.MAX}`));
+  assert.match(recents.capNote(recents.MAX), /oldest drops next/);
+
+  // The functions the two screens now depend on exist and are pure enough to
+  // call without a DOM. (localStorage is absent in Node; read() swallows that
+  // and returns [], which is the same answer it gives on an opaque origin.)
+  assert.equal(typeof recents.remove, 'function');
+  assert.equal(typeof recents.update, 'function');
+  assert.deepEqual(recents.remove('nothing'), []);
+  assert.deepEqual(recents.update('nothing', 'x'), []);
+  // An empty message is not an update. update() is called after every settled
+  // slider drag, and a failed encode must not blank an entry.
+  assert.deepEqual(recents.update('nothing', ''), []);
+});
+
+test('the slider ticks admit that three of spec 5.4 four markers are off the range', async () => {
+  // This is the contradiction implementing the ticks surfaced, and it is pinned
+  // rather than papered over: spec 5.4 specifies a linear 40-355 COLUMN slider
+  // with markers at bubble 40 / phone 108 / tablet 222 / desktop 355. The
+  // 2026-08-09 reversal moved the slider to CHARACTERS on a range derived from
+  // RAMP_COLS_MIN 65 to RAMP_COLS_MAX 130 -- so only the phone marker is
+  // reachable. Two documents disagree and neither knows it.
+  //
+  // If spec 5.4 is rewritten, or the range widens, this test is the thing that
+  // notices.
+  const { sliderTicks } = await import('../app/screens/compose.js');
+  const { sizeRange, charsForCols } = await import('../src/sizing.js');
+  const { CAPTURE_ASPECT } = await import('../src/constants.js');
+
+  const range = sizeRange();
+  const ticks = sliderTicks(range);
+
+  const device = ticks.filter((t) => t.device);
+  assert.equal(device.length, 1, 'exactly one spec 5.4 device marker is currently in range');
+  assert.equal(device[0].label, 'PHONE');
+  assert.equal(device[0].chars, charsForCols(CODEC.RAMP, 108, CAPTURE_ASPECT));
+
+  // Bubble is below the floor and tablet/desktop are above the ceiling.
+  assert.ok(charsForCols(CODEC.RAMP, 40, CAPTURE_ASPECT) < range.minChars);
+  assert.ok(charsForCols(CODEC.RAMP, 222, CAPTURE_ASPECT) > range.maxChars);
+  assert.ok(charsForCols(CODEC.RAMP, 355, CAPTURE_ASPECT) > range.maxChars);
+
+  // The endpoints are labelled, or the track carries one lonely mark and reads
+  // as decoration.
+  assert.equal(ticks[0].chars, range.minChars);
+  assert.equal(ticks[ticks.length - 1].chars, range.maxChars);
+  // Every tick is inside the track it is drawn on.
+  for (const t of ticks) assert.ok(t.chars >= range.minChars && t.chars <= range.maxChars);
+});
+
+test('every route in the table is reachable from the running app', async () => {
+  // The review's blocking finding: settings, settings/charsets and
+  // settings/size-test were all registered stubs that NOTHING linked to. Spec
+  // 5.1 asks for a corner glyph on capture and there was none, so charset
+  // editing, calibration, the size test and the offline readout were all
+  // unreachable.
+  //
+  // "Reachable" is asserted the only way it can be without a browser: some
+  // screen navigates to it. That catches the failure that actually happened --
+  // a route with no inbound link anywhere.
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const { V1_ROUTES, DEFAULT_ROUTE } = await import('../app/router.js');
+
+  const dir = new URL('../app/screens/', import.meta.url);
+  const source = readdirSync(dir)
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => readFileSync(new URL(f, dir), 'utf8'))
+    .join('\n');
+
+  for (const route of V1_ROUTES) {
+    if (route === DEFAULT_ROUTE) continue; // the app opens here
+    assert.ok(
+      source.includes(`'${route}'`),
+      `route "${route}" is registered but nothing in app/screens navigates to it`,
+    );
+  }
+});
+
+test('the picture screens hold the 44px floor the action bar enforces in code', async () => {
+  // The review's §4: "the 44px floor is enforced in one place and violated in
+  // two". actionbar.js throws at runtime rather than ship a 43px slot, while
+  // .sc-style was 19px tall and .sc-thumb carried a hardcoded 10px label.
+  //
+  // Either the floor is a rule and something checks it across all screens, or
+  // it is a rule about the action bar. This is that check.
+  const { readFileSync } = await import('node:fs');
+  const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+
+  // Every control small enough to need one must grow its hit box with negative
+  // insets rather than grow the row -- the row lives in a band whose height is
+  // fixed and shared.
+  for (const [file, sel] of [
+    ['app/screens/capture.css', '.sc-style'],
+    ['app/screens/compose.css', '.sc-strip-del'],
+    ['app/screens/paste.css', '.sc-thumb-del'],
+  ]) {
+    const css = read(file);
+    assert.match(css, new RegExp(`\\${sel}::before\\s*\\{[^}]*inset:\\s*-`, 's'), `${sel} needs a 44px hit box`);
+  }
+
+  // And no stylesheet may carry an off-scale font size again. 10px is now a
+  // token, which is the honest way to keep a deliberate exception.
+  for (const p of ['app/screens/capture.css', 'app/screens/compose.css', 'app/screens/paste.css', 'app/screens/settings.css', 'app/actionbar.css', 'app/shell.css']) {
+    const css = read(p).replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.ok(!/font-size:\s*\d+px/.test(css), `${p}: font sizes come from tokens, not from literals`);
+  }
+
+  // The two divergences the review found, both closed.
+  assert.ok(!/rgba\(255,\s*215,\s*0/.test(read('app/actionbar.css').replace(/\/\*[\s\S]*?\*\//g, '')), 'the accent wash is a token');
+  assert.match(read('app/tokens.css'), /--pt-accent-wash-hi:/);
+  assert.match(read('app/tokens.css'), /--pt-size-2xs:/);
 });

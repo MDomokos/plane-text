@@ -83,7 +83,21 @@ export function current() {
   return activeRoute;
 }
 
-// host: { container, createContext({ route, signal, screen }) -> ctx }
+// host: { container, createContext({ route, signal, screen }) -> ctx,
+//         afterMount?({ route, screen }) }
+//
+// afterMount runs once the screen has mounted successfully. It exists for the
+// things that can only happen after the new DOM is in place, and there is
+// exactly one class of those: telling the user the screen changed. Added
+// 2026-08-09. Until then the router replaced the container's children and
+// nothing moved focus, so a keyboard or screen-reader user was returned to the
+// top of the document with no announcement on every single navigation. The
+// container carries tabindex="-1" for precisely this purpose and nothing was
+// using it.
+//
+// It is a host hook rather than router code because the announcement is a
+// shell concern: main.js owns the shell's elements, and the router does not
+// know that a live region exists.
 export function start(options) {
   if (!options || !options.container || typeof options.createContext !== 'function') {
     throw new Error('start: needs { container, createContext }');
@@ -132,5 +146,13 @@ async function render() {
   } catch (err) {
     console.error(`mount(${screen.id})`, err);
     if (mine === token) host.container.textContent = 'This screen failed to load.';
+  }
+
+  // Still the current navigation? A screen that awaited something slow may
+  // have been superseded, and announcing a screen the user has already left is
+  // worse than not announcing at all.
+  if (mine !== token) return;
+  if (host.afterMount) {
+    try { host.afterMount({ route, screen }); } catch (err) { console.error('afterMount', err); }
   }
 }

@@ -92,10 +92,28 @@ function rowsForAspect(codec, cols, aspect) {
 export function sizeRange(aspect = 3 / 4) {
   const minChars = charsForCols(CODEC.RAMP, RAMP_COLS_MIN, aspect);
   const maxChars = charsForCols(CODEC.RAMP, RAMP_COLS_MAX, aspect);
+  // The midpoint is taken in COLUMNS and then converted, not taken in
+  // characters, and the two are different points.
+  //
+  // Cost is quadratic in columns, so bisecting the CHARACTER range lands at
+  // about 103 columns on a 65-130 track -- past the true middle of 97.5, in the
+  // upper third of what the user is actually choosing. Bisecting the COLUMN
+  // range gives 98 and 12,969 characters, which is below the character midpoint
+  // of 14,203 precisely because of that curvature.
+  //
+  // Columns win because columns are what the slider is for: the readout says
+  // "98 columns · fits a phone", and a control whose middle is not in the
+  // middle of the thing it names is a control that has to be learned. See
+  // SIZE_DEFAULT_END in constants.js for why the default moved off the bottom.
+  const midChars = charsForCols(CODEC.RAMP, Math.round((RAMP_COLS_MIN + RAMP_COLS_MAX) / 2), aspect);
+  let defaultChars = minChars;
+  if (SIZE_DEFAULT_END === 'max') defaultChars = maxChars;
+  else if (SIZE_DEFAULT_END === 'mid') defaultChars = midChars;
   return {
     minChars,
     maxChars,
-    defaultChars: SIZE_DEFAULT_END === 'max' ? maxChars : minChars,
+    midChars,
+    defaultChars,
   };
 }
 

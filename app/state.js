@@ -13,8 +13,9 @@
 //                    takenAt } | null
 //  encoded         encode() result | null     null                 compose
 //  calibration     'auto' | 'off' | 'force'   CALIBRATION_DEFAULT  settings
-//  invert          bool (dark polarity)       INVERT_DEFAULT true  settings (no v1 UI)
-//  offline         { ready, version,          { ready:false, … }   offline shell / SW
+//  invert          bool (dark polarity)       INVERT_DEFAULT true  settings
+//  offline         { state, ready, version,   { state:'caching', … } offline shell / SW
+//                    missing, shell, update,
 //                    checkedAt }
 //  sizeTestLog     [{ chars, at, network,     []                   settings/size-test
 //                     outcome }]
@@ -33,6 +34,24 @@
 // Style is chosen at capture, not in the composer (spec 5.1). That is why
 // styleId's owner is the capture screen, and why the compose screen has no
 // style picker to write one.
+//
+// That rule was repaired rather than broken, 2026-08-09.
+//
+// "Style was chosen at capture" was false for an imported photo, because there
+// was no capture: the picker lived on `paste` and dropped the user straight
+// into `compose`, so a library import had no moment at which style could be
+// chosen. A gap rather than a preference.
+//
+// Two repairs were available. Give compose a style row, which makes styleId a
+// two-owner field and this table wrong. Or route imports through capture so the
+// moment exists. The second was taken, as a frozen sub-mode in capture.js, and
+// styleId still has one owner.
+//
+// The consequence: capture and compose now share a stage geometry (shell.css
+// .app-frame) and differ only in their chrome bands, so they read as one screen
+// with two modes. That is also why the style gesture is capture only. On
+// compose a horizontal drag is the carousel, and a screen where every drag is a
+// mode guess is worse than one with a gesture fewer.
 
 import { DEFAULT_STYLE, resolveStyle, customStyle } from '../src/styles.js';
 import { sizeRange, colsForChars } from '../src/sizing.js';
@@ -42,12 +61,18 @@ export function initialState() {
   return {
     styleId: DEFAULT_STYLE,
     customCharsets: [],
-    sizeChars: sizeRange().defaultChars, // opens at the bottom of the range
+    // Wherever SIZE_DEFAULT_END says, which is the middle of the COLUMN range
+    // as of 2026-08-09. The store must not carry its own opinion about this:
+    // that is how two files end up disagreeing about the same default.
+    sizeChars: sizeRange().defaultChars,
     capture: null,
     encoded: null,
     calibration: CALIBRATION_DEFAULT,
     invert: INVERT_DEFAULT,
-    offline: { ready: false, version: null, checkedAt: null },
+    // `state` is the word the readout renders; `ready` is the boolean anything
+    // else should branch on. Both, because a tick cannot say "caching" and a
+    // string cannot be tested without parsing it. See app/offline.js.
+    offline: { state: 'caching', ready: false, version: null, missing: [], shell: false, update: false, checkedAt: null },
     sizeTestLog: [],
   };
 }

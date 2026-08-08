@@ -6,7 +6,7 @@
 //   importScripts('app/precache-manifest.classic.js');
 //   self.PRECACHE.map(function (p) { return new URL(p, self.location).href; });
 
-self.PRECACHE_VERSION = 'pt-1948d1d870ab';
+self.PRECACHE_VERSION = 'pt-40c9675bb4fc';
 
 self.PRECACHE = [
   'app/actionbar.css',
@@ -21,6 +21,7 @@ self.PRECACHE = [
   'app/icon.svg',
   'app/main.js',
   'app/mock.js',
+  'app/offline.js',
   'app/pipeline.js',
   'app/precache-manifest.classic.js',
   'app/precache-manifest.js',
@@ -35,10 +36,13 @@ self.PRECACHE = [
   'app/screens/index.js',
   'app/screens/paste.css',
   'app/screens/paste.js',
+  'app/screens/settings.css',
   'app/screens/settings.js',
   'app/screens/size-test.js',
   'app/shell.css',
   'app/state.js',
+  'app/stylegesture.js',
+  'app/thumb.js',
   'app/tokens.css',
   'app/viewfinder.js',
   'app/words.js',

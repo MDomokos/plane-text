@@ -10,6 +10,7 @@
     "precache": "node tools/build-precache.js",
     "icons": "node tools/make-icons.js",
     "encode": "node tools/encode-cli.js",
-    "testd": "node tools/make-test-d.js"
+    "testd": "node tools/make-test-d.js",
+    "smoke": "node test/smoke.mjs"
   }
 }

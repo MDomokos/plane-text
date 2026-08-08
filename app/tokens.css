@@ -61,6 +61,10 @@
    * brightest thing on screen. A solid gold slab under a black viewfinder
    * pulls the eye off the picture. */
   --pt-accent-wash: rgba(255, 215, 0, 0.12);
+  /* The pressed state of that wash. Added 2026-08-09: actionbar.css carried
+   * this as a literal rgba(255,215,0,0.2), which was one of exactly two
+   * off-token values in the app. */
+  --pt-accent-wash-hi: rgba(255, 215, 0, 0.2);
 
   --pt-warn: #e0a83e;
   --pt-error: #e0807a;
@@ -80,6 +84,12 @@
   --pt-font: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, monospace;
   --pt-mono: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, monospace;
 
+  /* 10: the thumbnail name, and nothing else. Added 2026-08-09 because
+   * paste.css had `font-size: 10px` as a literal, the only off-scale size in
+   * the app. It is deliberate rather than a mistake, since a 46px thumbnail
+   * cannot carry 12px type, so it becomes a token instead of being rounded up
+   * into one that does not fit. */
+  --pt-size-2xs: 0.625rem;
   --pt-size-xs: 0.75rem;   /* 12: captions, secondary readouts */
   --pt-size-sm: 0.875rem;  /* 14: body small, labels */
   --pt-size-md: 1rem;      /* 16: body. Never below this for a control. */
@@ -111,18 +121,74 @@
 
   /* Frame --------------------------------------------------------------- */
 
-  /* The rendered width of the art, republished by app/art.js on every fit.
-   * The chrome clamps to it so controls belong to the picture rather than to
-   * the window: the art is 3:4 and usually height-bound, so on anything wider
-   * than a phone it is a column in the middle of the screen. 100% until the
-   * first paint, and on a phone it resolves to roughly the full width anyway.
+  /* The width the chrome clamps itself to, so controls belong to the picture
+   * rather than to the window: the art is 3:4 and usually height-bound, so on
+   * anything wider than a phone it is a column in the middle of the screen.
+   * 100% until the first fit, and on a phone it resolves to roughly the full
+   * width anyway.
    *
    * Never applied to the element the art is measured inside. Clamping that
-   * would feed the measurement back into itself. */
+   * would feed the measurement back into itself.
+   *
+   * CHANGED 2026-08-09. This used to be the MEASURED width of the last thing
+   * painted: paintArt() returned a getBoundingClientRect() and every screen
+   * republished it. That made the chrome's width a function of the aspect of
+   * whatever was rendered last, so the action bar and the save sheet resized on
+   * navigation, and a received message with an unusual grid resized them again.
+   *
+   * It is now derived from the RESERVED stage box at the fixed capture aspect
+   * (art.js stageArtWidth). That is stable by construction: the stage box is
+   * identical on every picture screen (--pt-chrome-top / --pt-chrome-bot), and
+   * CAPTURE_ASPECT is a constant every source is cropped to. The width now
+   * changes only when the viewport does. */
   --pt-art-w: 100%;
 
   --pt-header-h: 48px;
   --pt-bottom-h: 64px;
+
+  /* ------------------------------------------------------------------------
+   * THE RESERVED STAGE BAND. Added 2026-08-09, from the UX review's §1.
+   *
+   * The problem it fixes, measured at 390 x 844 with a 34px bottom inset:
+   * each picture screen composed its own flex column, so the art's box was
+   * whatever was left after that screen's chrome. Capture had 43px above and
+   * 42px below; compose had 38px above and 127px below. The stage was 661px on
+   * one and 581px on the other, and its centre sat at 373.5px against 328.5px.
+   *
+   * So committing to a photo moved the picture 45px up the screen and shrank
+   * it by 12%, at the exact moment the whole promise of a WYSIWYG viewfinder
+   * is that what you framed is what you got. Worse, --pt-art-w was republished
+   * from each screen's last painted rect, so the action bar, the style bar,
+   * the readouts and the save sheet all changed width on navigation too. The
+   * frame breathed around the one thing that is supposed to be still.
+   *
+   * The fix is these two numbers. Both bands are sized to their TALLEST
+   * consumer and the shorter screens leave theirs part-empty. That costs the
+   * viewfinder ~80px of height and buys a picture that does not move on any
+   * screen, which is the invariant the action bar already has extended to the
+   * only other thing on screen. It is also the precondition for the carousel:
+   * a carousel of images that each land somewhere different is not one.
+   *
+   * Sized by their consumers, not chosen:
+   *   top   44   capture's style row at the tap minimum. compose's name line
+   *              (38px) is shorter and sits inside it.
+   *   bottom 176 the viewer, which is the tallest: fit line 21 + character
+   *              count 18 + slider 44 + carousel strip 44 + status 18, plus
+   *              gaps. capture's readout sits inside it with room to spare.
+   *
+   * WHY 176 AND NOT MORE. On a 390 x 844 phone with a 34px bottom inset the
+   * screen container is 844 - (52 action bar + 34 inset) = 758px. Take the two
+   * bands off and the stage is 758 - 44 - 176 = 538px. The art is 3:4, so a
+   * full-width 390px picture needs 520px of height and gets 538. The art stays
+   * width-bound and full-bleed, which is the property worth protecting. One
+   * more row in the bottom band and the picture starts shrinking on the
+   * commonest phone size. 194px is the hard ceiling; 176 is the working room.
+   *
+   * Change either number and every picture screen moves together, which is the
+   * point. Do not override them per route.
+   * --------------------------------------------------------------------- */
+  --pt-chrome-top: 44px;
+  --pt-chrome-bot: 176px;
 
   /* The action bar's own height. Taller than --pt-bottom-h's minimum because
    * the hero carries a bracket glyph at display size. */

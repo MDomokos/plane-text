@@ -30,11 +30,26 @@
 // a `let` inside mount(). If three screens end up needing it reactively, that
 // is the argument for promoting it, and it belongs in the disagreements section
 // rather than in a quiet patch.
+//
+// 2026-08-09: the "not a gallery" argument is narrowed, not abandoned.
+//
+// The paragraphs above are still why there is no History feature, no IndexedDB
+// blob store and no second representation, and why this file is ninety lines
+// rather than a subsystem. What changed is reach: the strip lived only at the
+// bottom of `paste`, so moving between pictures cost BACK, a screen and a tap.
+// The carousel in compose.js removes that, and per-entry delete comes with it.
+//
+// Delete forces a conversation this file was avoiding. Once there is a delete
+// button the user believes this is storage, and eight entries with silent LIFO
+// eviction is then data loss rather than an undo cache. Either raise the cap,
+// which means blobs and IndexedDB and the History feature that was cut, or show
+// it. It is shown: capNote() renders next to the strip.
 
 const KEY = 'planetext.recents.v1';
 
 // Eight is the strip, not a limit anyone should reach for. Past this the oldest
-// falls off silently, which is right for an undo and wrong for an archive.
+// falls off, and since 2026-08-09 it no longer does so silently, which is what
+// makes this an undo cache rather than an archive that quietly loses things.
 export const MAX = 8;
 
 // { name, message, source, at }
@@ -91,6 +106,49 @@ export function find(name) {
   return read().find((e) => e.name === name) || null;
 }
 
+// Replace an entry's message in place, keeping its position.
+//
+// This exists because the viewer re-encodes on every slider move, and add()
+// de-duplicates by MESSAGE. Calling add() after a re-encode would therefore
+// treat the resized picture as a different picture and push a second entry, and
+// dragging the slider across its range would fill all eight slots with the same
+// photograph at eight sizes, evicting everything else the user had.
+//
+// Returns the new list, or the unchanged one if there is no such entry.
+export function update(name, message) {
+  if (typeof message !== 'string' || !message) return list();
+  const next = read();
+  const at = next.findIndex((e) => e.name === name);
+  if (at === -1) return next;
+  next[at] = { ...next[at], message };
+  write(next);
+  return next;
+}
+
+// Delete one entry, by name.
+//
+// By name rather than by index, because the caller holding an index is holding
+// it across a render and the list can be rewritten by the other screen in
+// between. The name is the identity the user sees, and it is what the
+// accessible label on the delete control says.
+export function remove(name) {
+  const next = read().filter((e) => e.name !== name);
+  write(next);
+  return next;
+}
+
 export function clear() {
   try { localStorage.removeItem(KEY); } catch { /* nothing to do */ }
+  return [];
+}
+
+// What the strip says about its own cap.
+//
+// One sentence, one place, so the viewer's carousel and the open screen's strip
+// cannot describe the same limit differently. Empty until the cap is actually
+// in sight: telling someone with two pictures that they may keep eight is
+// noise, and the warning has to still be legible when it matters.
+export function capNote(n = read().length) {
+  if (n < MAX) return '';
+  return `${n} of ${MAX} · oldest drops next`;
 }

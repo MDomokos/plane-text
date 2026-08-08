@@ -371,6 +371,132 @@ export async function openCamera({ facingMode = 'environment', host = null } = {
   };
 }
 
+// ---------------------------------------------------------------------------
+// A STILL, WEARING THE CAMERA'S INTERFACE. Added 2026-08-09 for §6e.
+//
+// The hole this fills: "style was chosen at capture" was false for an imported
+// photo, because there was no capture. The file picker on `paste` dropped the
+// user straight into `compose`, so a library import had no moment at which
+// style could be chosen at all.
+//
+// The fix routes imports THROUGH capture: picking a file lands on a frozen
+// capture screen showing the still, with the live style row and a shutter that
+// reads [ USE ]. That keeps state.js's single-owner-per-field table intact --
+// styleId still has exactly one writer.
+//
+// Rather than teach capture.js and viewfinder.js about a second kind of source,
+// the still is given the camera's shape. openStill() returns the same object
+// openCamera() does, minus the stream. The viewfinder cannot tell the
+// difference and does not need to: it asks for a preview grab at a column
+// count and gets one, at the same dot resolution, through the same
+// supersampled downscale, cropped to the same aspect.
+//
+// The one honest difference is that grabStill() returns the ORIGINAL buffer
+// rather than a fresh sensor read. There is no sensor. The still is already
+// the still, and re-deriving it from a downscale would be a lossy round trip
+// for no reason. paste.js has already limited the decode to MAX_SOURCE_PX, so
+// this buffer is the full-resolution source as far as this app is concerned.
+// ---------------------------------------------------------------------------
+export function openStill(photo) {
+  if (!photo || !photo.rgba || !photo.width || !photo.height) {
+    throw new CameraError('failed', 'That photo could not be read.');
+  }
+
+  // One canvas, painted once. Every preview grab is a drawImage out of it, so
+  // the source pixels are uploaded a single time however many style changes
+  // and resizes follow.
+  const source = makeCanvas(photo.width, photo.height);
+  const sctx = source.getContext('2d', { willReadFrequently: true });
+  // createImageData + set, rather than `new ImageData(buffer, w, h)`. The
+  // constructor form needs the ImageData global, which is the newer API and the
+  // one an environment is likeliest to lack, and this is the only place that
+  // would need it. It also sidesteps the constructor's requirement that the
+  // buffer be exactly a Uint8ClampedArray, which `photo.rgba` is only on one of
+  // the two paths that produce it.
+  const img = sctx.createImageData(photo.width, photo.height);
+  img.data.set(photo.rgba);
+  sctx.putImageData(img, 0, 0);
+
+  const canvases = new Map();
+  let stopped = false;
+
+  function canvasFor(w, h) {
+    const key = `${w}x${h}`;
+    let entry = canvases.get(key);
+    if (!entry) {
+      const canvas = makeCanvas(w, h);
+      entry = { canvas, ctx: canvas.getContext('2d', { willReadFrequently: true }) };
+      canvases.set(key, entry);
+    }
+    return entry;
+  }
+
+  function cropRect(aspect) {
+    const w = photo.width;
+    const h = photo.height;
+    if (w / h > aspect) {
+      const cw = Math.round(h * aspect);
+      return { sx: Math.round((w - cw) / 2), sy: 0, sw: cw, sh: h };
+    }
+    const ch = Math.round(w / aspect);
+    return { sx: 0, sy: Math.round((h - ch) / 2), sw: w, sh: ch };
+  }
+
+  return {
+    video: null,
+
+    get width() { return photo.width; },
+    get height() { return photo.height; },
+    // Always live while mounted. There is no frame to wait for, which is why
+    // the frozen sub-mode never shows the "waiting for the camera" path.
+    get live() { return !stopped; },
+
+    // Deliberately no multi-step downscale. openCamera() steps down in halves
+    // because a 1920px video frame to a 130px grid is a 15x reduction and one
+    // drawImage at that ratio aliases badly on some GPUs. paste.js already caps
+    // an imported photo at 1600px on the long edge, and the browser's own
+    // resizeQuality:'high' did that reduction, so the remaining ratio here is
+    // small enough for a single call.
+    grabPreview(codec, cols) {
+      if (stopped) return null;
+      const cell = CELL_DOTS[codec];
+      if (!cell) throw new Error(`unknown codec ${codec}`);
+
+      const rows = rowsFor(cols, CAPTURE_ASPECT, 1, codec);
+      const k = supersampleFor(codec);
+      const grabW = cols * cell.w * k;
+      const grabH = rows * cell.h * k;
+
+      const { sx, sy, sw, sh } = cropRect(CAPTURE_ASPECT);
+      const out = canvasFor(grabW, grabH);
+      out.ctx.drawImage(source, sx, sy, sw, sh, 0, 0, grabW, grabH);
+      const img = out.ctx.getImageData(0, 0, grabW, grabH);
+
+      return {
+        rgba: img.data,
+        width: grabW,
+        height: grabH,
+        rows,
+        supersample: k,
+        aspect: grabW / grabH,
+      };
+    },
+
+    // The original, uncropped, so encode() does the aspect fit with a focus
+    // point exactly as it does for a shot frame.
+    grabStill() {
+      if (stopped) return null;
+      return { rgba: photo.rgba, width: photo.width, height: photo.height };
+    },
+
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      canvases.clear();
+    },
+  };
+}
+
 function stopStream(stream, video) {
   for (const track of stream.getTracks()) track.stop();
   try { video.pause(); } catch { /* already gone */ }

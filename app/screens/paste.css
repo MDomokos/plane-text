@@ -138,19 +138,55 @@
   color: var(--pt-ink-faint);
 }
 
+/* The cap, said out loud, and only once it is in sight. See recents.js: the
+ * moment there is a delete control the user believes this is storage, and
+ * silent eviction at eight entries is then data loss rather than an undo cache
+ * behaving as designed. */
+.sc-recent-cap {
+  color: var(--pt-warn);
+  letter-spacing: var(--pt-track);
+}
+
+/* The empty state. This screen used to render NOTHING when the list was empty
+ * because renderRecents() returned early, so on first run the feature did not
+ * exist until it silently appeared one day. */
+.sc-recent-empty {
+  margin: 0;
+  font-size: var(--pt-size-xs);
+  line-height: var(--pt-line-body);
+  color: var(--pt-ink-faint);
+}
+
 /* Horizontal scroll rather than a wrap. A second row would start to look like
- * the gallery this is not. */
+ * the gallery this is not.
+ *
+ * The scrollbar was `display: none`. It is now maybe-rain's signature bar:
+ * 6px, gold thumb, 2px border in the background colour with background-clip:
+ * padding-box, which makes it read as a thin gold line rather than a chunky
+ * browser control. Hiding it cost a desktop affordance for nothing. */
 .sc-recent-strip {
   display: flex;
-  gap: var(--pt-space-2);
+  gap: var(--pt-space-3);
   overflow-x: auto;
-  scrollbar-width: none;
   padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--pt-accent) transparent;
 }
-.sc-recent-strip::-webkit-scrollbar { display: none; }
+.sc-recent-strip::-webkit-scrollbar { height: 6px; }
+.sc-recent-strip::-webkit-scrollbar-track { background: transparent; }
+.sc-recent-strip::-webkit-scrollbar-thumb {
+  background: var(--pt-accent);
+  border: 2px solid var(--pt-bg);
+  background-clip: padding-box;
+  border-radius: var(--pt-radius);
+}
+
+.sc-thumb-wrap {
+  position: relative;
+  flex: none;
+}
 
 .sc-thumb {
-  flex: none;
   width: 46px;
   display: flex;
   flex-direction: column;
@@ -161,7 +197,36 @@
   color: var(--pt-ink-faint);
   font-family: inherit;
   cursor: pointer;
+  touch-action: manipulation;
 }
+
+/* Delete. Quiet until you go near it, and a 44px target from a 22px control
+ * via negative insets rather than by growing the row. */
+.sc-thumb-del {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--pt-bg);
+  border: 0;
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-faint);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: color var(--pt-dur-base) ease, opacity var(--pt-dur-base) ease;
+  touch-action: manipulation;
+}
+.sc-thumb-del::before { content: ''; position: absolute; inset: -11px; }
+.sc-thumb-del:hover,
+.sc-thumb-del:focus-visible { color: var(--pt-error); opacity: 1; }
 
 .sc-thumb-box {
   display: block;
@@ -182,9 +247,13 @@
 }
 
 /* The name identifies, not the picture. At 46px the art is texture, and this
- * label is how you know which one it is. */
+ * label is how you know which one it is.
+ *
+ * This was `font-size: 10px`, the only off-scale size in the app. The 10px is
+ * deliberate, since a 46px thumbnail cannot carry 12px type, so it became a
+ * token rather than being rounded up into one that does not fit. */
 .sc-thumb-name {
-  font-size: 10px;
+  font-size: var(--pt-size-2xs);
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -2,9 +2,8 @@
  *
  * An ordinary scrolling screen, which is why it keeps the header and its back
  * button while the three picture screens do not (shell.css). Nothing here is
- * gold except the one selected value in a group -- the same underline-and-ink
- * idiom the style row uses, so a selection means the same thing on every screen
- * in the app.
+ * gold except the one selected value in a group, using the same underline-and-
+ * ink idiom as the style row, so a selection means the same thing everywhere.
  *
  * No card surfaces. Sections separate by a hairline and a label, because there
  * is no elevation anywhere in this app and a settings screen is exactly where
@@ -103,7 +102,7 @@
   color: var(--pt-error);
 }
 
-/* A choice group. Words with a gold underline on the active one -- the same
+/* A choice group. Words with a gold underline on the active one, the same
  * idiom as the style selector, because it means the same thing. */
 .sc-set-choice {
   display: flex;

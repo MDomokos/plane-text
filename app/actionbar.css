@@ -85,7 +85,7 @@
   letter-spacing: var(--pt-track-wide);
 }
 .pt-slot-hero:hover { box-shadow: inset 0 0 0 1px var(--pt-accent-hi); color: var(--pt-accent-hi); }
-.pt-slot-hero:active { background: rgba(255, 215, 0, 0.2); }
+.pt-slot-hero:active { background: var(--pt-accent-wash-hi); }
 
 .pt-hero-label {
   min-width: 0;

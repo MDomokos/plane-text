@@ -1,55 +1,32 @@
-// Plane Text: the offline shell. Registration, verification, and the readout.
+// Plane Text: the page's side of the service worker.
 //
-// The service worker itself is /sw.js at the repo root -- see the header of
-// that file for why it is not in here and why it is a classic script. This
-// module is the page's side of the conversation.
+// sw.js is at the repo root; see its header for why. The slot element is passed
+// in rather than looked up, so main.js stays the only file touching a shell
+// element.
 //
-// It exists as its own file rather than inside main.js because main.js is "the
-// only file that touches the shell's own elements", and keeping that true is
-// worth more than keeping the registration next to the bootstrap. So the slot
-// element is PASSED IN. This module never looks anything up.
+// Four states, because silent update-on-load makes "fully cached" and "current"
+// different things and one tick cannot say both:
 //
-// ---------------------------------------------------------------------------
-// WHAT THE READOUT IS ALLOWED TO CLAIM
+//   unsupported  no serviceWorker. file://, or a browser that cannot.
+//   caching      registered, not yet verified, or not yet controlling.
+//   ready        every entry present and the shell resolves with no network.
+//                Only this state shows a version.
+//   incomplete   something is missing. Names the count, because this is the
+//                state that means the app dies at 30,000 feet.
 //
-// The 2026-08-09 decision: verify every precache entry by name, plus one
-// no-network fetch of index.html, and report a VERSION STRING rather than a
-// tick. The reasoning was that silent update-on-load makes "fully cached" and
-// "current" two different states, and a single tick collapses them.
-//
-// So there are four states and the readout names each one:
-//
-//   unsupported  no serviceWorker in navigator. file://, or a browser that
-//                cannot do this. Say so; do not show a spinner forever.
-//   caching      registered, not yet verified. The honest word during install.
-//   ready        every entry present AND the shell resolves with no network.
-//                Only this state may show the version.
-//   incomplete   registered, and something is missing. Names the count, because
-//                "not ready" with no number is not actionable and this is the
-//                state that means the app will die at 30,000 feet.
-//
-// A fifth flag rides alongside: `update`, true when a new worker is installed
-// and waiting. Deliberately not an error state. The app works; a newer one is
-// sitting there, and activating it is the user's call from settings.
-// ---------------------------------------------------------------------------
+// `update` rides alongside: a newer worker is installed and waiting. Not an
+// error. The app works, and activating is the user's call from settings.
 
 const VERIFY_TIMEOUT_MS = 5000;
 
-// Ask the controlling worker to verify itself. Resolves to the result object
-// or to null if there is nobody to ask.
-//
-// MessageChannel rather than a 'message' listener on navigator.serviceWorker,
-// because the reply belongs to this request. A shared listener has to match
-// replies to callers by hand, and gets it wrong the first time two screens ask
-// at once.
+// MessageChannel rather than a listener on navigator.serviceWorker, so the
+// reply belongs to this request. A shared listener has to match replies to
+// callers by hand and gets it wrong the first time two screens ask at once.
 function askWorker(worker, message) {
   return new Promise((resolve) => {
     if (!worker) { resolve(null); return; }
     const channel = new MessageChannel();
-    // A worker that never replies must not leave the readout saying "caching"
-    // forever. Five seconds is far longer than the check takes and short
-    // enough that a wedged worker is visible rather than indistinguishable
-    // from a slow one.
+    // A wedged worker must not leave the readout saying "caching" forever.
     const timer = setTimeout(() => resolve(null), VERIFY_TIMEOUT_MS);
     channel.port1.onmessage = (event) => {
       clearTimeout(timer);
@@ -69,8 +46,27 @@ export function verify() {
   return askWorker(navigator.serviceWorker.controller, { type: 'PT_VERIFY' });
 }
 
-// Activate a waiting worker. The user's decision, made in settings, never
-// automatic. See sw.js for the mixed-build failure this avoids.
+// Collect a message the share target left. The worker took the POST body,
+// stashed it and 303'd here. Read once and delete, or a share would re-open
+// somebody's picture on the next launch.
+const INBOX = 'pt-inbox-v1';
+const INBOX_KEY = 'message';
+
+export async function takeInbox() {
+  if (typeof caches === 'undefined') return null;
+  try {
+    const cache = await caches.open(INBOX);
+    const hit = await cache.match(INBOX_KEY);
+    if (!hit) return null;
+    const text = await hit.text();
+    await cache.delete(INBOX_KEY);
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
+// The user's call, from settings. See sw.js for the mixed-build failure.
 export function applyUpdate() {
   if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
   navigator.serviceWorker.getRegistration().then((reg) => {
@@ -78,10 +74,8 @@ export function applyUpdate() {
   });
 }
 
-// The one line the header slot and the settings screen both render from.
-//
-// Shared so the two cannot drift into describing the same state differently,
-// which is the failure this codebase has recorded eight times in other shapes.
+// One line, shared by the header slot and settings, so the two cannot describe
+// the same state differently.
 export function offlineLabel(offline) {
   if (!offline) return '';
   if (offline.state === 'unsupported') return 'no offline';
@@ -90,27 +84,20 @@ export function offlineLabel(offline) {
     const n = offline.missing ? offline.missing.length : 0;
     return n ? `offline: ${n} missing` : 'offline: not ready';
   }
-  // Ready. The version is the payload -- it is the whole reason this is a
-  // string and not a tick.
   return offline.update ? `${offline.version} · update ready` : String(offline.version || 'ready');
 }
 
-// ---------------------------------------------------------------------------
-// start({ store, slot })
-//
-// Registers, wires the lifecycle, and keeps state.offline current. The slot is
-// updated on every store change rather than written directly, so the settings
-// screen reading the same field cannot disagree with the header.
-// ---------------------------------------------------------------------------
+// Registers, wires the lifecycle, keeps state.offline current. The slot is
+// repainted from the store rather than written directly, so settings and the
+// header cannot disagree.
 export function startOffline({ store, slot }) {
   const paint = () => {
     if (slot) slot.textContent = offlineLabel(store.get().offline);
   };
 
   const patch = (next) => {
-    // The store compares by reference, so a fresh object always notifies. That
-    // is wanted here: `checkedAt` moves on every check even when nothing else
-    // does, and settings shows it.
+    // A fresh object always notifies, which is wanted: checkedAt moves on every
+    // check even when nothing else does, and settings shows it.
     store.set({ offline: { ...store.get().offline, ...next } });
     paint();
   };
@@ -118,9 +105,8 @@ export function startOffline({ store, slot }) {
   store.subscribe((_s, changed) => { if (changed.has('offline')) paint(); });
 
   if (typeof navigator === 'undefined' || !navigator.serviceWorker) {
-    // file://, or a browser without service workers. This is not an error and
-    // it is not hidden: the app runs, and it will not survive a flight, and the
-    // person who needs to know that is the person about to board.
+    // Not an error and not hidden. The app runs, it will not survive a flight,
+    // and the person who needs to know is about to board.
     patch({ state: 'unsupported', ready: false, version: null, checkedAt: Date.now() });
     return;
   }
@@ -130,10 +116,9 @@ export function startOffline({ store, slot }) {
   const run = async () => {
     const result = await verify();
     if (!result) {
-      // Registered but not controlling. This is the normal state on the very
-      // first load: the worker installs, and nothing is intercepting until the
-      // page is reloaded. Naming it 'caching' rather than 'incomplete' is
-      // correct -- nothing is missing, the takeover simply has not happened.
+      // Registered but not controlling, which is normal on the first load.
+      // Nothing is missing, the takeover has not happened, so this is caching
+      // rather than incomplete.
       patch({ state: 'caching', ready: false, checkedAt: Date.now() });
       return;
     }
@@ -147,8 +132,8 @@ export function startOffline({ store, slot }) {
     });
   };
 
-  // Relative, and it resolves against the document, not against this module.
-  // See sw.js: on GitHub Pages this is /plane-text/sw.js.
+  // Relative, resolving against the document rather than this module. On GitHub
+  // Pages that is /plane-text/sw.js.
   navigator.serviceWorker.register('sw.js').then((reg) => {
     const noteWaiting = () => { if (reg.waiting) patch({ update: true }); };
     noteWaiting();
@@ -160,20 +145,19 @@ export function startOffline({ store, slot }) {
       });
     });
   }).catch((err) => {
-    // A failed registration is worth naming rather than swallowing: it is the
-    // difference between "this app will work on a plane" and "it will not".
+    // Named rather than swallowed: this is the difference between the app
+    // working on a plane and not.
     console.error('offline: service worker registration failed', err);
     patch({ state: 'unsupported', ready: false, checkedAt: Date.now() });
   });
 
-  // The worker taking control is the moment the app actually becomes offline
-  // capable, and it happens after registration resolves. Re-verify then.
+  // Taking control is the moment the app becomes offline capable, and it
+  // happens after registration resolves.
   navigator.serviceWorker.addEventListener('controllerchange', run);
   navigator.serviceWorker.ready.then(run);
 
-  // And once more when the app is brought back to the foreground, which on a
-  // phone is how most sessions start. Cheap, and it catches a worker that
-  // finished installing while the app was backgrounded.
+  // And on return to the foreground, which on a phone is how most sessions
+  // start. Catches a worker that finished installing while backgrounded.
   document.addEventListener('visibilitychange', () => { if (!document.hidden) run(); });
 
   run();

@@ -8,7 +8,7 @@
 // It changes when any of them changes and only then, so it is safe as both the
 // cache name and the version string the offline readout reports.
 
-export const PRECACHE_VERSION = 'pt-1948d1d870ab';
+export const PRECACHE_VERSION = 'pt-40c9675bb4fc';
 
 export const PRECACHE = [
   'app/actionbar.css',
@@ -23,6 +23,7 @@ export const PRECACHE = [
   'app/icon.svg',
   'app/main.js',
   'app/mock.js',
+  'app/offline.js',
   'app/pipeline.js',
   'app/precache-manifest.classic.js',
   'app/precache-manifest.js',
@@ -37,10 +38,13 @@ export const PRECACHE = [
   'app/screens/index.js',
   'app/screens/paste.css',
   'app/screens/paste.js',
+  'app/screens/settings.css',
   'app/screens/settings.js',
   'app/screens/size-test.js',
   'app/shell.css',
   'app/state.js',
+  'app/stylegesture.js',
+  'app/thumb.js',
   'app/tokens.css',
   'app/viewfinder.js',
   'app/words.js',
