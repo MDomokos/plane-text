@@ -1561,3 +1561,118 @@ test('the precache manifest is generated, and drift fails here rather than in fl
     assert.ok(PRECACHE.includes(rel), `${rel} must be precached`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// The live viewfinder (spec 5.8). Four tests, and each one pins a place the
+// preview could silently stop agreeing with the encoder.
+
+test('splitting autoLevels did not change autoLevels', async () => {
+  // The unfreeze of src/tone.js is only defensible if it is genuinely
+  // additive. This is the assertion that says so: the composition of the two
+  // new halves must be the old function, bit for bit, including the two
+  // degenerate branches that once silently deleted the image.
+  const { autoLevels, measureLevels, applyLevels } = await import('../src/tone.js');
+
+  const cases = {
+    ordinary: Float64Array.from({ length: 400 }, (_, i) => (i % 97) / 96),
+    // 97% white with a few dark pixels: the 2nd and 98th percentile land on
+    // the same value and the true-range fallback has to fire.
+    lineDrawing: Float64Array.from({ length: 400 }, (_, i) => (i < 8 ? 0.05 : 1)),
+    flat: new Float64Array(400).fill(0.42),
+  };
+
+  for (const [name, luma] of Object.entries(cases)) {
+    const { lo, hi } = measureLevels(luma, 2, 98);
+    assert.deepEqual(
+      Array.from(applyLevels(luma, lo, hi)),
+      Array.from(autoLevels(luma, 2, 98)),
+      `${name}: measure+apply must equal autoLevels`,
+    );
+  }
+
+  // And the flat case still passes through rather than inventing 0.5.
+  assert.deepEqual(Array.from(autoLevels(cases.flat, 2, 98)), Array.from(cases.flat));
+});
+
+test('encode takes supplied tone endpoints, and reports them either way', async () => {
+  const { encode } = await import('../src/encode.js');
+  const { mockPhoto } = await import('../app/mock.js');
+  const photo = mockPhoto({ width: 120, height: 160, subject: 'scene' });
+  const opts = { codec: CODEC.BRAILLE, cols: 24 };
+
+  const measured = encode(photo.rgba, photo.width, photo.height, opts);
+  assert.equal(measured.stats.levelsSupplied, false);
+  assert.ok(measured.stats.rawLevels, 'a measuring encode reports what it measured');
+  assert.deepEqual(measured.stats.levels, measured.stats.rawLevels);
+
+  // Supplying exactly what it measured must reproduce the frame, which is what
+  // makes the EMA safe: at rest, smoothed endpoints are measured endpoints.
+  const supplied = encode(photo.rgba, photo.width, photo.height, {
+    ...opts,
+    levels: measured.stats.levels,
+  });
+  assert.equal(supplied.stats.levelsSupplied, true);
+  assert.equal(supplied.stats.rawLevels, null, 'no measurement unless asked for one');
+  assert.deepEqual(supplied.lines, measured.lines);
+
+  // Supplying different endpoints must actually change the picture, or the
+  // option is decorative.
+  const shifted = encode(photo.rgba, photo.width, photo.height, {
+    ...opts,
+    levels: { lo: 0.4, hi: 0.6 },
+    reportLevels: true,
+  });
+  assert.notDeepEqual(shifted.lines, measured.lines);
+  // ...and it must still report this frame's own, or the EMA starves.
+  assert.deepEqual(shifted.stats.rawLevels, measured.stats.rawLevels);
+  assert.deepEqual(shifted.stats.levels, { lo: 0.4, hi: 0.6 });
+});
+
+test('the atlas glyph set is indexed exactly as gridToRows indexes it', async () => {
+  // Two renderings of one grid: the <pre> on compose serialises through
+  // gridToRows, the canvas on capture blits atlas.glyphs[value]. If these two
+  // orderings ever disagree the picture is scrambled per cell and globally
+  // plausible -- this project's signature failure, and the reason two tests
+  // already pin the braille corners.
+  const { glyphsFor } = await import('../app/atlas.js');
+
+  for (const [codec, ramp] of [
+    [CODEC.BRAILLE, null],
+    [CODEC.QUADRANT, null],
+    [CODEC.RAMP, DEFAULT_RAMP],
+  ]) {
+    const glyphs = glyphsFor(codec, ramp);
+    const cols = glyphs.length;
+    const values = Uint8Array.from(glyphs.map((_, i) => i));
+    const row = gridToRows({ codec, cols, rows: 1, values, ramp: ramp || DEFAULT_RAMP })[0];
+    assert.equal([...row].join(''), glyphs.join(''), `${codec}: atlas order must match gridToRows`);
+  }
+});
+
+test('a dot-resolution preview buffer round-trips its own geometry', async () => {
+  // camera.grabPreview() sizes its buffer cols*cell.w by rows*cell.h so that
+  // encode() recovers exactly the rows it was sized for and downscale() becomes
+  // a 1:1 copy. If rowsFor() and that arithmetic ever disagree, the preview
+  // silently renders a different grid from the one the readout reports.
+  const { CELL_DOTS, CAPTURE_ASPECT } = await import('../src/constants.js');
+  const { encode } = await import('../src/encode.js');
+
+  for (const codec of [CODEC.BRAILLE, CODEC.QUADRANT, CODEC.RAMP]) {
+    const cell = CELL_DOTS[codec];
+    for (const cols of [40, 65, 103, 130, 184]) {
+      const rows = rowsFor(cols, CAPTURE_ASPECT, 1, codec);
+      const w = cols * cell.w;
+      const h = rows * cell.h;
+
+      assert.equal(rowsFor(cols, w, h, codec), rows, `${codec} @${cols}: rows must survive the buffer`);
+
+      // And the aspect the camera reports must make fitToAspect a no-op, or a
+      // row of dots is sliced off a buffer that is already dot-exact and every
+      // cell below the slice shears by a quarter of a cell.
+      const rgba = new Uint8ClampedArray(w * h * 4).fill(128);
+      const out = encode(rgba, w, h, { codec, cols, aspect: w / h });
+      assert.equal(out.stats.cropped, false, `${codec} @${cols}: preview must not be re-cropped`);
+      assert.equal(out.lines.length, rows);
+    }
+  }
+});

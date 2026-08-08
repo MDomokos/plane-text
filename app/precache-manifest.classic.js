@@ -6,12 +6,14 @@
 //   importScripts('app/precache-manifest.classic.js');
 //   self.PRECACHE.map(function (p) { return new URL(p, self.location).href; });
 
-self.PRECACHE_VERSION = 'pt-4bd4ab3b3980';
+self.PRECACHE_VERSION = 'pt-107817899072';
 
 self.PRECACHE = [
   'app/actionbar.css',
   'app/actionbar.js',
   'app/art.js',
+  'app/atlas.js',
+  'app/camera.js',
   'app/icon-192.png',
   'app/icon-512.png',
   'app/icon-maskable-512.png',
@@ -37,6 +39,7 @@ self.PRECACHE = [
   'app/shell.css',
   'app/state.js',
   'app/tokens.css',
+  'app/viewfinder.js',
   'app/words.js',
   'index.html',
   'manifest.webmanifest',
