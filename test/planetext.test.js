@@ -1989,15 +1989,47 @@ test('the picture screens hold the 44px floor the action bar enforces in code', 
   const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 
   // Every control small enough to need one must grow its hit box with negative
-  // insets rather than grow the row -- the row lives in a band whose height is
+  // offsets rather than grow the row -- the row lives in a band whose height is
   // fixed and shared.
-  for (const [file, sel] of [
-    ['app/screens/capture.css', '.sc-style'],
-    ['app/screens/compose.css', '.sc-strip-del'],
-    ['app/screens/paste.css', '.sc-thumb-del'],
+  //
+  // This asserted `inset: -` until 2026-08-09, and the shorthand is exactly what
+  // it can no longer be. The style row became a scroll box pinned to --pt-tap
+  // (a scroller on one axis forces the other to clip), so the hit box has to
+  // land inside 44px rather than merely be 44px, and it cannot be symmetric to
+  // do it: `inset` resolves against the containing block's PADDING box, and
+  // .sc-style's 1px border-bottom sits outside that, so the two vertical
+  // offsets differ by one. Measured in Chrome: -12/-13 lands on 0..44 in the
+  // 44px container, symmetric -12 gives 43, symmetric -12.5 gives 44 with half
+  // a pixel clipped off each end.
+  //
+  // So the assertion is on the property that matters -- a negative top and a
+  // negative bottom -- rather than on the shorthand that used to express it.
+  const captureCss = read('app/screens/capture.css');
+  assert.match(captureCss, /\.sc-style::before\s*\{[^}]*top:\s*-\d/s, '.sc-style needs a 44px hit box');
+  assert.match(captureCss, /\.sc-style::before\s*\{[^}]*bottom:\s*-\d/s, '.sc-style needs a 44px hit box');
+
+  // The two thumbnail deletes were in that list until 2026-08-09, and having
+  // them there was the bug. Both made the 44px from a 22px button pinned to the
+  // top-right corner of a 30px and a 46px thumbnail, so the expanded target
+  // covered half the thumbnail it annotates and ran into the next one: any tap
+  // on an old picture deleted it. The arithmetic is in compose.css.
+  //
+  // A destructive control is the one place where a target you can miss costs
+  // less than a target you cannot, so these two sit under the floor on purpose
+  // and arm before they fire instead. That is the trade, and this asserts it is
+  // still paid for on both screens: no hit-box expansion, an armed state in the
+  // stylesheet, and a handler that reads the attribute before it removes
+  // anything.
+  for (const [css, js, sel] of [
+    ['app/screens/compose.css', 'app/screens/compose.js', '.sc-strip-del'],
+    ['app/screens/paste.css', 'app/screens/paste.js', '.sc-thumb-del'],
   ]) {
-    const css = read(file);
-    assert.match(css, new RegExp(`\\${sel}::before\\s*\\{[^}]*inset:\\s*-`, 's'), `${sel} needs a 44px hit box`);
+    assert.ok(
+      !new RegExp(`\\${sel}::before`).test(read(css)),
+      `${sel} must not expand its hit box: it sits on top of the thumbnail it deletes`,
+    );
+    assert.match(read(css), new RegExp(`\\${sel}\\[data-armed="1"\\]`), `${sel} needs a visible armed state`);
+    assert.match(read(js), /dataset\.armed !== '1'/, `${js}: delete must arm before it fires`);
   }
 
   // And no stylesheet may carry an off-scale font size again. 10px is now a

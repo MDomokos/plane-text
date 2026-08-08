@@ -7,6 +7,7 @@
 //  field           type                       default              owner
 //  --------------  -------------------------  -------------------  ----------------------
 //  styleId         string                     DEFAULT_STYLE 'art'  capture
+//  facing          'environment' | 'user'     'environment'        capture
 //  customCharsets  [{ id, name, ramp }]       []                   settings/charsets
 //  sizeChars       int, CHARACTERS            sizeRange().default  compose
 //  capture         { source, width, height,   null                 capture
@@ -60,6 +61,20 @@ import { CALIBRATION_DEFAULT, INVERT_DEFAULT } from '../src/constants.js';
 export function initialState() {
   return {
     styleId: DEFAULT_STYLE,
+    // Which camera. The getUserMedia constraint value verbatim, rather than a
+    // boolean like `selfie`, so nothing between here and camera.js has to
+    // translate it and there is no chance of the two ends disagreeing about
+    // which way round the flag means.
+    //
+    // Rear by default: the app photographs a thing to send to somebody, and the
+    // front camera is the exception. Persisted, because a user who flipped to
+    // the front camera and navigated to compose and back has not changed their
+    // mind, and a control that silently resets is a control you stop trusting.
+    //
+    // It is a request, not a fact. camera.js passes it as `{ ideal: … }`, so a
+    // device with one camera quietly ignores it, which is exactly why the flip
+    // button is hidden unless enumerateDevices() finds a second one.
+    facing: 'environment',
     customCharsets: [],
     // Wherever SIZE_DEFAULT_END says, which is the middle of the COLUMN range
     // as of 2026-08-09. The store must not carry its own opinion about this:
@@ -79,7 +94,7 @@ export function initialState() {
 
 // What survives a reload. `capture` and `encoded` do not: a photo is a
 // session, and a stale encode is worse than none.
-export const PERSISTED = ['styleId', 'customCharsets', 'sizeChars', 'calibration', 'invert', 'sizeTestLog'];
+export const PERSISTED = ['styleId', 'facing', 'customCharsets', 'sizeChars', 'calibration', 'invert', 'sizeTestLog'];
 
 const STORAGE_KEY = 'planetext.state.v1';
 

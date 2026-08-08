@@ -249,6 +249,59 @@ export default register(defineScreen({
       }
     }, { signal: ctx.signal });
 
+    // Arming. Deliberately the same code as the carousel's in compose.js, and
+    // deliberately not factored out: it is twenty lines that close over one
+    // screen's root and its own render function, and a shared module would have
+    // to be handed both plus the glyph and the label wording, which is more
+    // interface than duplication. The two must not DIVERGE, which is what the
+    // cross-references in both files and in settings.js are for.
+    //
+    // Two taps, the second on a different glyph, as CLEAR ALL in settings.js is
+    // two taps on a different word, and 3000ms is that button's window. This
+    // pays for the sub-44px hit box in paste.css: small enough to miss, so it
+    // has to be harmless to hit.
+    //
+    // One armed control at a time. Capture phase on the screen root so it beats
+    // the click that opens a thumbnail, and any tap anywhere else on the screen
+    // -- the paste target, the library row, another thumbnail -- disarms.
+    //
+    // No status line on this screen, so unlike compose.js the button says it
+    // alone. That is the only difference between the two, and it is a
+    // difference in what the screens have rather than in how delete behaves.
+    const ARM_MS = 3000;
+    let armedDel = null;
+    let armedName = '';
+    let armTimer = 0;
+
+    function disarm() {
+      clearTimeout(armTimer);
+      armTimer = 0;
+      if (!armedDel) return;
+      armedDel.dataset.armed = '';
+      armedDel.textContent = '×';
+      armedDel.setAttribute('aria-label', `Delete ${armedName}`);
+      armedDel = null;
+      armedName = '';
+    }
+
+    // The label changes with the glyph. A screen reader user gets no colour and
+    // no ✓, so without this the control announces itself as Delete twice and
+    // the second announcement is the one that fires.
+    function arm(del, name) {
+      disarm();
+      armedDel = del;
+      armedName = name;
+      del.dataset.armed = '1';
+      del.textContent = '✓';
+      del.setAttribute('aria-label', `Confirm deleting ${name}`);
+      armTimer = setTimeout(disarm, ARM_MS);
+    }
+
+    root.addEventListener('pointerdown', (e) => {
+      if (armedDel && !armedDel.contains(e.target)) disarm();
+    }, { signal: ctx.signal, capture: true });
+    ctx.signal.addEventListener('abort', () => clearTimeout(armTimer), { once: true });
+
     // The strip. Changed 2026-08-09:
     //
     //   1. The label and an empty state always render. This returned early on
@@ -258,6 +311,10 @@ export default register(defineScreen({
     //      forces the cap to become visible.
     //   3. Thumbnails come from app/thumb.js, shared with the carousel.
     function renderRecents() {
+      // Before replaceChildren(), because the button the arming state points at
+      // is about to stop existing and its timer would then disarm a detached
+      // node while the strip shows nothing armed.
+      disarm();
       recentWrap.replaceChildren();
       const list = recents.list();
 
@@ -321,6 +378,8 @@ export default register(defineScreen({
         del.textContent = '×';
         del.addEventListener('click', (e) => {
           e.stopPropagation();
+          if (del.dataset.armed !== '1') { arm(del, entry.name); return; }
+          disarm();
           recents.remove(entry.name);
           renderRecents();
         }, { signal: ctx.signal });

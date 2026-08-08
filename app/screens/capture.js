@@ -179,7 +179,27 @@ export default register(defineScreen({
     // every font stack, without the hero's bar to hold the silhouette.
     gear.textContent = '[=]';
 
-    topRow.append(styles, gear);
+    // The camera flip, top left, mirroring the gear top right.
+    //
+    // Hidden until there is something to flip to. The count comes from
+    // enumerateDevices(), and it is asked AFTER the stream opens rather than
+    // here: before a permission is granted the browser reports a placeholder
+    // list with blank labels and, in Safari, a single generic entry whatever
+    // the hardware is. Asking early would hide the button on a phone and show
+    // it on a laptop with one webcam, which is both errors at once.
+    //
+    // Brackets rather than a glyph, like the gear and the hero, because a
+    // rotate-arrows pictograph is not in the monospace stacks this app is
+    // pinned to and would render as a different shape or a tofu box per
+    // device. The angle brackets read as "the other way round" and are one
+    // cell each.
+    const flip = document.createElement('button');
+    flip.type = 'button';
+    flip.className = 'sc-flip';
+    flip.hidden = true;
+    flip.textContent = '[><]';
+
+    topRow.append(flip, styles, gear);
     top.append(topRow);
 
     // --- the stage -------------------------------------------------------
@@ -245,7 +265,12 @@ export default register(defineScreen({
     }
     ctx.signal.addEventListener('abort', () => clearTimeout(statusTimer), { once: true });
 
-    function showNotice(title, body) {
+    // `onRetry` is the difference between a notice and a dead end. Passing it
+    // adds a button whose click handler runs inside a real user gesture, which
+    // is the context a browser trusts for getUserMedia and the one mount() by
+    // definition cannot provide. Omitted for the failures where retrying is a
+    // lie: see the call site.
+    function showNotice(title, body, onRetry = null) {
       canvas.hidden = true;
       notice.hidden = false;
       notice.textContent = '';
@@ -256,6 +281,35 @@ export default register(defineScreen({
       p.className = 'sc-notice-body';
       p.textContent = body;
       notice.append(h, p);
+
+      if (!onRetry) return;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'sc-notice-retry';
+      b.textContent = 'ENABLE CAMERA';
+      b.addEventListener('click', async () => {
+        // Disabled for the duration rather than left live. getUserMedia can sit
+        // for as long as the permission sheet is on screen, and a second tap
+        // behind that sheet queues a second stream request against a decision
+        // the user has not made yet.
+        b.disabled = true;
+        b.textContent = 'ASKING…';
+        try {
+          await onRetry();
+        } finally {
+          // The notice is usually gone by now, torn down by a successful
+          // start. If it is not, the button has to come back or the retry was
+          // a one-shot, which is the bug this whole control exists to fix.
+          if (b.isConnected) { b.disabled = false; b.textContent = 'ENABLE CAMERA'; }
+        }
+      }, { signal: ctx.signal });
+      notice.append(b);
+    }
+
+    function hideNotice() {
+      notice.hidden = true;
+      notice.textContent = '';
+      canvas.hidden = false;
     }
 
     // The hero's label element, looked up once. querySelector inside a function
@@ -376,42 +430,114 @@ export default register(defineScreen({
     ], { signal: ctx.signal });
 
     // --- the source -----------------------------------------------------
-    if (importing) {
-      try {
-        camera = openStill(pending.photo);
-      } catch (err) {
-        cameraError = err instanceof CameraError ? err : new CameraError('failed', String(err));
-      }
-    } else {
-      try {
-        camera = await openCamera({ host: el });
-      } catch (err) {
-        cameraError = err instanceof CameraError ? err : new CameraError('failed', String(err));
-      }
-    }
-
-    // The router discards a late mount, but it cannot know about a camera
-    // opened during the await, which would stream on behind a dead screen.
-    if (ctx.signal.aborted) {
-      if (camera) camera.stop();
-      return;
-    }
+    //
+    // OPENED THROUGH A FUNCTION, NOT INLINE. Reworked 2026-08-09.
+    //
+    // This was a single `await openCamera()` at mount, and that was the whole
+    // camera lifecycle: one attempt, and whatever it returned was the screen
+    // for as long as you stayed on it. Two things now need a second attempt --
+    // the flip control, which reopens with the other facingMode, and the retry
+    // button in the failure notice -- so the open, the teardown of whatever was
+    // open before it, and the two branches that follow are one function that
+    // can run any number of times.
+    //
+    // The teardown at the top is the part that must not be forgotten. A
+    // MediaStreamTrack is not tied to ctx.signal, which is exactly why
+    // unmount() exists (see `live` at the top of this file), and a flip that
+    // opened a second stream without stopping the first would hold both
+    // cameras, keep the recording indicator lit, and on most phones fail
+    // outright, since a second getUserMedia while the sensor is busy throws
+    // NotReadableError -- which this screen would then report as "the camera is
+    // in use by another app", naming itself.
 
     // From the reserved stage box, not the last painted rect, so the action
     // bar and style row stop resizing on navigation. See art.js.
     const publish = (w, h) => publishArtWidth(stageArtWidth(w, h));
 
-    if (cameraError) {
-      // Spec 8: declining the camera is not a dead end. The library is the way
-      // through and it is one tap away on the same screen, so this is a notice
-      // rather than an error state with its own layout.
-      const body = cameraError.code === 'denied'
-        ? 'Open a photo from your library instead — the button below on the left.'
-        : 'You can still open a photo from your library — the button below on the left.';
-      showNotice(cameraError.message, body);
-      render(null);
-      autoFit(stage, publish, { signal: ctx.signal });
-    } else {
+    // One ResizeObserver for the life of the screen, whatever the source is.
+    // autoFit() attaches an observer and a visibilitychange listener, so
+    // calling it per open would stack a set per flip, and every one of them
+    // would keep firing at a `vf` that had been replaced. It reads the current
+    // `vf` through the closure instead.
+    autoFit(stage, (w, h) => {
+      publish(w, h);
+      if (!vf) return;
+      const shot = vf.refresh();
+      if (importing && shot) render({ result: shot.result, cols: shot.cols });
+    }, { signal: ctx.signal });
+
+    // Reveal the flip control once we know there is a second camera to flip to.
+    //
+    // enumerateDevices() only returns a truthful list once a permission has
+    // been granted -- before that the labels are blank and the count is a
+    // placeholder -- so this runs after a successful open and never before.
+    // It is also allowed to fail silently: on a browser without the API, or one
+    // that refuses the enumeration, the correct outcome is the button staying
+    // hidden, which is where it started.
+    async function offerFlip() {
+      if (importing) return;                 // a frozen still has no camera
+      if (!navigator.mediaDevices?.enumerateDevices) return;
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter((d) => d.kind === 'videoinput');
+        if (cams.length > 1) flip.hidden = false;
+      } catch { /* leave it hidden */ }
+    }
+
+    async function startSource() {
+      // Whatever is running now stops first. Order matters: the viewfinder
+      // reads frames off the camera, so stopping it second would leave a rAF
+      // loop grabbing from a stopped track for one frame.
+      if (vf) { vf.stop(); vf = null; }
+      if (camera) { camera.stop(); camera = null; }
+      cameraError = null;
+
+      if (importing) {
+        try {
+          camera = openStill(pending.photo);
+        } catch (err) {
+          cameraError = err instanceof CameraError ? err : new CameraError('failed', String(err));
+        }
+      } else {
+        try {
+          camera = await openCamera({ host: el, facingMode: state.get().facing });
+        } catch (err) {
+          cameraError = err instanceof CameraError ? err : new CameraError('failed', String(err));
+        }
+      }
+
+      // The router discards a late mount, but it cannot know about a camera
+      // opened during the await, which would stream on behind a dead screen.
+      // Still true here, and now also true of a flip whose await outlived the
+      // navigation that interrupted it.
+      if (ctx.signal.aborted) {
+        if (camera) { camera.stop(); camera = null; }
+        return;
+      }
+
+      live = { camera, vf };
+
+      if (cameraError) {
+        // Spec 8: declining the camera is not a dead end. The library is the
+        // way through and it is one tap away on the same screen, so this is a
+        // notice rather than an error state with its own layout.
+        //
+        // 'none' and 'unsupported' get no retry button. There is no camera and
+        // no browser API respectively, and neither is a decision anyone can
+        // change by tapping again -- a button that cannot work is worse than no
+        // button, because it costs a tap to learn the same thing the sentence
+        // above it already said.
+        const retryable = cameraError.code !== 'none' && cameraError.code !== 'unsupported';
+        const body = cameraError.code === 'denied'
+          ? 'Open a photo from your library instead — the button below on the left.'
+          : 'You can still open a photo from your library — the button below on the left.';
+        showNotice(cameraError.message, body, retryable ? startSource : null);
+        render(null);
+        return;
+      }
+
+      hideNotice();
+
       vf = startViewfinder({
         camera,
         canvas,
@@ -426,17 +552,20 @@ export default register(defineScreen({
       // second. See viewfinder.freeze().
       if (importing) vf.freeze();
 
-      // Rotate, URL bar collapse, window drag. The live loop re-fits every
-      // frame anyway; this covers the static rung, the frozen path and the
-      // first paint.
-      autoFit(stage, (w, h) => {
-        publish(w, h);
-        const shot = vf.refresh();
-        if (importing && shot) render({ result: shot.result, cols: shot.cols });
-      }, { signal: ctx.signal });
+      live = { camera, vf };
+
+      // The stage has not resized, so the observer above will not fire on its
+      // own, and a flip has to repaint from the new stream's first frame.
+      const r = stage.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) publish(r.width, r.height);
+      const shot = vf.refresh();
+      if (importing && shot) render({ result: shot.result, cols: shot.cols });
+
+      offerFlip();
     }
 
-    live = { camera, vf };
+    await startSource();
+    if (ctx.signal.aborted) return;
 
     // --- style, by swipe -------------------------------------------------
     // On the picture, vertical, capture only. See app/stylegesture.js.
@@ -466,6 +595,44 @@ export default register(defineScreen({
     }, { signal: ctx.signal });
 
     gear.addEventListener('click', () => ctx.navigate('settings'), { signal: ctx.signal });
+
+    // --- flip ------------------------------------------------------------
+    //
+    // Writes state.facing and reopens. It does NOT go through the store's
+    // subscribe() below: that handler exists to repaint the current stream when
+    // a style or size changes, and a facing change is not a repaint, it is a
+    // different camera. Routing it there would have a subscription tearing down
+    // the source underneath whatever else the notification was for.
+    //
+    // Disabled across the await for the same reason the retry button is: two
+    // flips in flight race each other's teardown, and the loser leaves a stream
+    // open that nothing holds a reference to any more.
+    function flipLabel() {
+      const front = state.get().facing === 'user';
+      flip.classList.toggle('is-front', front);
+      // The label says what you would GET, which is the convention every phone
+      // camera uses and the opposite of naming the current state.
+      flip.setAttribute('aria-label', front ? 'Switch to the rear camera' : 'Switch to the front camera');
+    }
+    flipLabel();
+
+    flip.addEventListener('click', async () => {
+      if (flip.disabled) return;
+      flip.disabled = true;
+      const next = state.get().facing === 'user' ? 'environment' : 'user';
+      state.set({ facing: next });
+      flipLabel();
+      try {
+        await startSource();
+      } finally {
+        flip.disabled = false;
+      }
+      if (ctx.signal.aborted) return;
+      // Named out loud, like the style gesture does. The picture changing is
+      // the real feedback, but a front camera pointed at a ceiling looks a lot
+      // like a rear camera that failed to start.
+      say(next === 'user' ? 'FRONT CAMERA' : 'REAR CAMERA');
+    }, { signal: ctx.signal });
 
     render(null);
   },

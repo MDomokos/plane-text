@@ -285,7 +285,10 @@
 
 .sc-strip-thumb {
   display: block;
-  width: 30px;
+  /* One size for both strips. Was 30px against the open screen's 46px, for the
+   * same eight entries out of the same cache. See --pt-thumb-w in tokens.css
+   * for why the shared number is 36 and not 46. */
+  width: var(--pt-thumb-w);
   padding: 0 0 3px;
   background: none;
   border: 0;
@@ -301,7 +304,7 @@
 
 .sc-strip-box {
   display: block;
-  height: 40px;
+  height: var(--pt-thumb-h);
   overflow: hidden;
   border-radius: var(--pt-radius);
   box-shadow: inset 0 0 0 1px var(--pt-line);
@@ -322,11 +325,60 @@
  * Visible rather than behind a long-press, because a long-press is invisible
  * and an undo cache you cannot prune is not an undo cache. Quiet until you go
  * near it: faint by default, error-coloured on hover and focus, so it reads as
- * available rather than as a threat sitting on every thumbnail. */
+ * available rather than as a threat sitting on every thumbnail.
+ *
+ * ---------------------------------------------------------------------------
+ * THE TARGET WAS EATING THE THUMBNAIL IT SAT ON. Fixed 2026-08-09.
+ *
+ * It was 22x22 at top:-6 right:-8 with `::before { inset: -11px }` to make the
+ * 44px minimum. .sc-strip-item was 30 wide by 44 tall at the time (40 art +
+ * 3 padding + 1 underline), so that target measured:
+ *
+ *   x  30 + 8 - 22 - 11 =  5   ..  30 + 8 + 11 = 49
+ *   y      -6 - 11      = -17  ..  -6 + 22 + 11 = 27
+ *
+ * 25 of the thumbnail's 30 columns and 27 of its 44 rows: 51% of the
+ * selectable area of the button it is supposed to annotate. And it ran to
+ * x=49 when the next item started at 38 (30 + the strip's 8px gap), so it also
+ * covered 11px of the NEIGHBOUR, and its delete. Tapping a thumbnail to select
+ * it deleted it instead, which is the whole reported bug.
+ *
+ * The 44px was never real. .sc-strip is overflow-x: auto, and a computed
+ * overflow of visible on one axis beside a scroller on the other becomes auto,
+ * so the strip clips its children vertically and there is no scrollable
+ * overflow on the block-start side. Everything above y=0 was discarded: the
+ * button rendered 16px tall, not 22, and the top 11px of the hit box did not
+ * exist.
+ *
+ * The hit box is now exactly the visible button, hung into the gap. At the
+ * shared thumbnail size (--pt-thumb-w 36, --pt-thumb-h 48, so the item is
+ * 36 x 52 with its padding and underline):
+ *
+ *   x  36 + 8 - 22 = 22  ..  44, the first pixel of the next item
+ *   y  0                 ..  22
+ *
+ * 14 of 36 columns and 22 of 52 rows, so 16% of the thumbnail's area against
+ * the old 51%, nothing over the neighbour, and the whole button is on screen
+ * for the first time. There is nowhere left to grow into: above is clipped,
+ * right is the next thumbnail, below and left are the picture.
+ *
+ * The x arithmetic is width-independent -- the button hangs off the right edge
+ * by exactly the gap -- so it survives a change to --pt-thumb-w. Only the
+ * coverage fractions above move.
+ *
+ * THAT IS A 22px TARGET AND --pt-tap IS 44. Said out loud, because actionbar.js
+ * throws rather than render a 43px slot. It is the same rule read the other
+ * way: there the cost of a small target is a primary action you cannot hit, and
+ * here the cost of a large one is a picture you cannot keep. This control also
+ * arms before it fires (see the armed rule below and compose.js), so missing it
+ * costs one tap and hitting it by accident costs nothing.
+ * --------------------------------------------------------------------------- */
 .sc-strip-del {
   position: absolute;
-  top: -6px;
-  right: -8px;
+  top: 0;
+  /* Exactly .sc-strip's gap, so the button stops where the next item begins.
+   * The gap is dead space, so spending it costs no selectable pixels. */
+  right: calc(var(--pt-space-2) * -1);
   width: 22px;
   height: 22px;
   display: flex;
@@ -342,19 +394,30 @@
   line-height: 1;
   cursor: pointer;
   opacity: 0.55;
-  transition: color var(--pt-dur-base) ease, opacity var(--pt-dur-base) ease;
+  /* box-shadow is in the list for the armed ring below: without it the ring
+   * snaps on while the ink warms over 200ms, which reads as two things
+   * happening rather than one state changing. */
+  transition: color var(--pt-dur-base) ease, opacity var(--pt-dur-base) ease, box-shadow var(--pt-dur-base) ease;
   touch-action: manipulation;
-}
-.sc-strip-del::before {
-  /* 22px visible, 44px target. Same trick as the style row: grow the hit box
-   * with negative insets, never the element, because the element is inside a
-   * band whose height is fixed. */
-  content: '';
-  position: absolute;
-  inset: -11px;
 }
 .sc-strip-del:hover,
 .sc-strip-del:focus-visible { color: var(--pt-error); opacity: 1; }
+
+/* Armed: the next tap is the one that deletes. The same two declarations as
+ * .sc-set-btn.is-danger[data-armed="1"] in settings.css, because it is the same
+ * promise made by the same idiom, and error-coloured only once armed for the
+ * same reason: a red mark sitting on every thumbnail reads as a warning about
+ * the pictures rather than about the action.
+ *
+ * compose.js swaps the glyph from × to ✓ with the attribute. The button is one
+ * cell wide at --pt-size-xs, so the character has to carry what CLEAR ALL says
+ * in four words. Full opacity as well: armed is not a hover state and must
+ * survive the pointer leaving. */
+.sc-strip-del[data-armed="1"] {
+  box-shadow: inset 0 0 0 1px var(--pt-error);
+  color: var(--pt-error);
+  opacity: 1;
+}
 
 /* The cap, said out loud, and only once it is in sight. See recents.capNote().
  * Delete is what makes this mandatory: once there is a delete button the user

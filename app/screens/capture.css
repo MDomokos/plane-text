@@ -34,7 +34,19 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 var(--pt-space-3);
+
+  /* A --pt-tap gutter each side, reserved for the two corner controls: the
+   * camera flip on the left, the gear on the right. Both are absolutely
+   * positioned so that the style row stays centred on the ART rather than on
+   * what is left after them, and absolute means they do not participate in
+   * layout, which means without this padding the style row would run
+   * underneath them.
+   *
+   * It did. Measured on the deployed build at a 530px viewport, with only the
+   * gear in place: .sc-styles scrollWidth 312 against clientWidth 306. Already
+   * overflowing on a screen wider than any phone, with HALFTONE disappearing
+   * under the gear glyph, and nothing in the file acknowledging it. */
+  padding: 0 var(--pt-tap);
 
   /* Clamped to the art. The stage below is not: it is the box the art is
    * measured against, and clamping it would feed back into the fit. */
@@ -47,12 +59,56 @@
 
 /* No box and no pills: words with a hairline underline on the active one. The
  * underline is the same 1px gold as everything else that marks a selection. */
+/* It scrolls, and the height is what makes that safe. Reworked 2026-08-09.
+ *
+ * Four codec names is 31 characters of monospace plus three gaps, and on a
+ * 390px phone minus two 44px corner gutters there is not room. The row was a
+ * plain centred flex line, so the overflow went nowhere: the ends were simply
+ * outside the box, unreachable, and partly under the gear.
+ *
+ * `safe center` is the whole reason this works. Plain `center` on an
+ * overflowing flex container overflows in BOTH directions, and overflow before
+ * the start edge is not scrollable in any engine -- so ART, the default and the
+ * first item, would be the one you could never reach. `safe` falls back to
+ * flex-start the moment the content stops fitting, which puts all of the
+ * overflow at the end where a scroll can get to it, and keeps the row centred
+ * on the art whenever it does fit, which is the common case.
+ *
+ * THE HEIGHT IS LOAD-BEARING. `overflow-x: auto` computes `overflow-y` from
+ * `visible` up to `auto`; there is no such thing as a box that scrolls in one
+ * axis and overflows in the other. So the moment this row scrolls, it also
+ * clips vertically -- and what sticks out vertically here is the ::before that
+ * turns a 20px word into a 44px target. Left at its content height of 20px,
+ * making the row scrollable would have quietly cut every tap target in this row
+ * back to 20px: a fix for a layout bug that breaks the accessibility hack the
+ * next rule down spends twenty lines defending.
+ *
+ * Pinning it to --pt-tap makes the scroll box exactly as tall as the hit boxes
+ * it contains, so nothing is clipped. It fits the band because the band is
+ * --pt-tap too; see --pt-chrome-top in tokens.css, which was sized for this row
+ * at the tap minimum in the first place.
+ *
+ * The scrollbar is hidden, against the app's habit of showing maybe-rain's gold
+ * bar. A 6px bar inside a 44px band sits directly on top of the hit boxes, and
+ * this row's primary control is a swipe on the picture below it. */
 .sc-styles {
   display: flex;
-  justify-content: center;
+  justify-content: safe center;
   align-items: center;
   gap: var(--pt-space-3);
+
+  min-width: 0;
+  height: var(--pt-tap);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* The row is a readout first. A drag on it should scroll it, not be stolen by
+   * the page, and nothing else here wants the horizontal axis. */
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
 }
+.sc-styles::-webkit-scrollbar { display: none; }
 
 /* The word. 12px type, and a 44px target.
  *
@@ -93,10 +149,33 @@
 .sc-style::before {
   content: '';
   position: absolute;
-  /* 19px visible, 44px target: 12.5px of reach added above and below. Half the
-   * horizontal gap on each side, so adjacent words tile their hit boxes
-   * without overlapping. */
-  inset: -12.5px calc(var(--pt-space-3) / -2);
+  /* 44px target, and the two vertical numbers are different on purpose.
+   *
+   * `inset` on an absolutely positioned child resolves against its containing
+   * block's PADDING box, not its border box. .sc-style is 20px tall
+   * (4 padding-top + 12 line + 3 padding-bottom + 1 border-bottom) but its
+   * padding box is 19, because the border-bottom is outside it. The original
+   * -12.5px all round was written against that 19 and was right: 19 + 25 = 44.
+   *
+   * A symmetric -12px was tried here first, on the arithmetic 20 + 12 + 12, and
+   * measured 43px in the browser -- the exact number actionbar.js throws over,
+   * introduced by a comment that trusted the border box.
+   *
+   * Symmetric is still not what is wanted, because the row above is now a
+   * scroll box pinned to exactly --pt-tap and anything hanging outside it is
+   * clipped rather than merely invisible. Centred in that 44px box the button's
+   * border box sits at y=12..32, so its padding box sits at 12..31: 12px of
+   * room above and 13px below. Asking for -12.5 both ways would put half a
+   * pixel of the target outside the box at each end and lose it.
+   *
+   * So: 12 above, 13 below, 19 + 12 + 13 = 44, landing on y=0..44 exactly.
+   *
+   * Horizontal is half the row's gap on each side, so adjacent words tile their
+   * hit boxes without overlapping. */
+  top: -12px;
+  bottom: -13px;
+  left: calc(var(--pt-space-3) / -2);
+  right: calc(var(--pt-space-3) / -2);
 }
 
 .sc-style:hover { color: var(--pt-ink-dim); }
@@ -129,6 +208,47 @@
   touch-action: manipulation;
 }
 .sc-gear:hover { color: var(--pt-ink-dim); }
+
+/* Camera flip --------------------------------------------------------------- */
+
+/* The left corner of the top band, mirroring the gear on the right. Same
+ * treatment for the same reason: a corner control is a corner control, and it
+ * must not push the style row off the centre of the picture.
+ *
+ * Hidden unless there is something to flip TO. enumerateDevices() is asked once
+ * the stream is open -- before that the browser reports a placeholder list with
+ * no labels -- and the button is only revealed when it finds a second
+ * videoinput. A flip button on a laptop with one webcam is a control that lies.
+ *
+ * It is also hidden while a still is being imported: there is no camera in that
+ * sub-mode, only a frozen frame wearing the camera's interface. */
+.sc-flip {
+  position: absolute;
+  left: var(--pt-space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--pt-tap);
+  height: var(--pt-tap);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-faint);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: color var(--pt-dur-base) ease;
+  touch-action: manipulation;
+}
+.sc-flip:hover { color: var(--pt-ink-dim); }
+.sc-flip[hidden] { display: none; }
+
+/* Front-facing is a state, not a mode, so it takes the same gold the style row
+ * uses for "this one" rather than a second idiom. */
+.sc-flip.is-front { color: var(--pt-accent); }
 
 /* The viewfinder ----------------------------------------------------------- */
 
@@ -168,6 +288,22 @@
   pointer-events: none;
 }
 
+/* `display: block` above beats the `hidden` attribute, which is only a UA-sheet
+ * `display: none` and loses to any author rule. Added 2026-08-09.
+ *
+ * showNotice() sets `canvas.hidden = true` and then puts the notice in the
+ * stage. Without this line the canvas stayed in the flex row at its DEFAULT
+ * intrinsic size -- 300 x 150, because no camera means nothing ever sized it --
+ * and shoved the notice sideways. Measured on the deployed build: a 230px
+ * notice starting at x=300 in a 530px stage, so the "no camera" message was
+ * pinned to the right edge next to 300px of nothing.
+ *
+ * Every other hideable element in the app already carries its own `[hidden]`
+ * rule for exactly this reason (.sc-field, .sc-slider, .sc-set-row, .app-back).
+ * This one element was missed, and it is the one that only appears when
+ * something has already gone wrong, which is why nobody saw it. */
+.sc-art[hidden] { display: none; }
+
 /* No camera. Not an error layout: declining the permission leaves the library
  * one tap away in the action bar below, and spec 8's copy already promises
  * that escape. This is a notice sitting where the picture would be. */
@@ -189,6 +325,47 @@
   line-height: 1.5;
   color: var(--pt-ink-faint);
 }
+
+/* The way back. Added 2026-08-09.
+ *
+ * The notice used to be two paragraphs and nothing else, on the reasoning that
+ * declining the camera is not a dead end because the library is one tap away in
+ * the action bar. That is true and it is not the whole story: it makes the
+ * LIBRARY recoverable and leaves the CAMERA permanently gone for the rest of
+ * the session, with no control anywhere in the app that would ask again.
+ *
+ * Which matters most in the case this app is built for. openCamera() is called
+ * from mount(), so the permission prompt is raised without a user gesture.
+ * Browsers treat a gesture-less getUserMedia as the weakest kind of request:
+ * Safari in particular is entitled to reject it outright, and an installed iOS
+ * PWA has no address bar, no site-settings menu and no reload button, so a
+ * standalone launch that lost the prompt had no route back to it at all short
+ * of deleting the app from the home screen.
+ *
+ * So the notice gets a button, and the button matters because it is a REAL TAP:
+ * the retry runs getUserMedia inside a user gesture, which is the context the
+ * browser trusts most. It is the same hairline-outlined control as everything
+ * else, not gold -- the hero in the bar below is the screen's one accent, and
+ * this is a repair, not the main event. */
+.sc-notice-retry {
+  min-height: var(--pt-tap);
+  margin-top: var(--pt-space-4);
+  padding: 0 var(--pt-space-4);
+  background: none;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-dim);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track);
+  cursor: pointer;
+  transition: box-shadow var(--pt-dur-base) ease, color var(--pt-dur-base) ease;
+  touch-action: manipulation;
+}
+.sc-notice-retry:hover { box-shadow: inset 0 0 0 1px var(--pt-line-strong); color: var(--pt-ink); }
+.sc-notice-retry[hidden] { display: none; }
+.sc-notice-retry:disabled { opacity: 0.4; cursor: default; }
 
 /* Bottom band -------------------------------------------------------------- */
 

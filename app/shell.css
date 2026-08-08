@@ -7,14 +7,55 @@
 
 * { box-sizing: border-box; }
 
-html, body {
+/* THE VIEWPORT, AND WHY IT IS NOT `height: 100%`. Corrected 2026-08-09.
+ *
+ * This block used to read:
+ *
+ *     html, body { margin: 0; height: 100%; }
+ *     body       { min-height: 100dvh; ... }
+ *
+ * with the comment "dvh so the bottom bar does not hide behind the mobile URL
+ * bar". The rule above it made that false. `height: 100%` on body resolves
+ * against html, and html's 100% resolves against the initial containing block,
+ * which is the LARGE viewport: the height the page would have with the URL bar
+ * collapsed. So body took a definite lvh height, `min-height: 100dvh` was a
+ * smaller number and never bound, and the last grid row, the action bar, was
+ * laid out at lvh while the user could only see dvh of it.
+ *
+ * Measured on the deployed build before the fix, by setting html to 1400px at a
+ * 919px innerHeight: body's used height became 1400px. min-height:100dvh did
+ * not cap it, which is the proof that the dvh was decorative.
+ *
+ * `height: 100dvh` is the fix and it must be a HEIGHT rather than a min-height:
+ * the grid's `1fr` track and .app-frame's `height: 100%` both need a definite
+ * height to resolve against, which is what the original `height: 100%` was
+ * quietly providing and why removing it outright is not the answer.
+ *
+ * The 100vh line above it is the fallback for engines without dvh, and it is
+ * the old wrong behaviour on purpose: wrong-but-laid-out beats a body with no
+ * height at all, which collapses the stage to zero and renders nothing (see the
+ * "86px screen above a 1043px action bar" note further down for what a zero
+ * stage does to the viewfinder).
+ *
+ * overflow: hidden on both, because after this the frame is exactly one
+ * viewport tall and there is nothing to scroll to. The document scrolling by a
+ * few pixels under a thumb is the single loudest tell that a standalone PWA is
+ * a web page. .app-screen is the one scroller in the app. */
+html {
   margin: 0;
   height: 100%;
+  overflow: hidden;
+  /* Not inherited, but the effective value is the intersection down the
+   * ancestor chain, so setting it here disables double-tap-to-zoom app-wide.
+   * The screens that need `none` for a gesture still override it downward. */
+  touch-action: manipulation;
 }
 
 body {
-  /* dvh so the bottom bar does not hide behind the mobile URL bar. */
-  min-height: 100dvh;
+  margin: 0;
+  height: 100vh;    /* fallback; see the note above */
+  height: 100dvh;
+  overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr auto;
   background: var(--pt-bg);
@@ -23,7 +64,44 @@ body {
   font-size: var(--pt-size-md);
   line-height: var(--pt-line-body);
   -webkit-font-smoothing: antialiased;
-  overscroll-behavior-y: none;   /* no pull-to-refresh over a live viewfinder */
+  overscroll-behavior: none;   /* no pull-to-refresh over a live viewfinder */
+
+  /* ---------------------------------------------------------------------
+   * THE NATIVE-FEEL LAYER. Added 2026-08-09.
+   *
+   * Four browser defaults that are correct for a document and wrong for a
+   * camera. Each one is a separate tell, and on a phone they are the
+   * difference between an app and a web page in a chromeless window.
+   *
+   *   tap-highlight  A translucent grey rectangle flashed over any element
+   *                  with a click handler. Every control in this app already
+   *                  has a :active state; the flash is a second, uglier one
+   *                  in a colour from no token.
+   *   touch-callout  Long-press on iOS raises a share/copy sheet over the
+   *                  control. On a shutter button held for a moment, that is
+   *                  the OS interrupting a photo.
+   *   user-select    A drag that starts on a label selects text instead of
+   *                  swiping the style. The picture screens' gestures are
+   *                  horizontal drags across exactly the elements a browser
+   *                  most wants to turn into a selection.
+   *
+   * The one field in the app opts back in below: a payload you cannot select
+   * is a payload you cannot check.
+   * --------------------------------------------------------------------- */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The exception. Everything the user may need to select, copy out of, or place
+ * a caret in. */
+input,
+textarea,
+.sc-field {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 /* Header ------------------------------------------------------------------ */
@@ -118,6 +196,11 @@ body[data-route="paste"] { grid-template-rows: 1fr auto; }
 .app-screen {
   min-height: 0;          /* lets a scrolling child actually scroll in a grid */
   overflow-y: auto;
+  /* The only scroller in the app, so it is also the only place a scroll can
+   * chain out of. `contain` stops a flick at the end of settings from handing
+   * the gesture to the document, which is what pull-to-refresh is made of. */
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: var(--pt-space-4) calc(var(--pt-space-4) + var(--pt-safe-right)) var(--pt-space-4) calc(var(--pt-space-4) + var(--pt-safe-left));
 }
 
@@ -126,6 +209,34 @@ body[data-route="paste"] { grid-template-rows: 1fr auto; }
  * Paste keeps its padding: it is a form, not a picture. */
 body[data-route="capture"] .app-screen,
 body[data-route="compose"] .app-screen { padding: 0; overflow: hidden; }
+
+/* THE TOP SAFE AREA ON THE HEADERLESS ROUTES. Added 2026-08-09.
+ *
+ * --pt-safe-top existed and was read in exactly one place: .app-header, five
+ * rules up. And .app-header is `display: none` on capture, compose and paste,
+ * which is three of the app's five screens and all three of the ones a phone
+ * spends its time on. So with `viewport-fit=cover` in index.html and
+ * `black-translucent` as the iOS status bar style, both deliberate, the 44px
+ * --pt-chrome-top band began at y=0 with the status bar drawn over it.
+ *
+ * On a notched iPhone in standalone that inset is 47-59px, which is more than
+ * the whole band: the style row and the gear were entirely underneath the
+ * clock and the Dynamic Island. The token was correct, the plumbing reached
+ * one element.
+ *
+ * It goes on .app-screen rather than on .app-frame, because .app-frame is
+ * `height: 100%` of this box and the grid inside it must divide what is LEFT
+ * after the inset. Padding on the ancestor is the one place that is true
+ * without any band's fixed height having to know about the notch.
+ *
+ * Settings is untouched: its header is visible and already pads itself, and
+ * adding it here as well would count the inset twice. */
+body[data-route="capture"] .app-screen,
+body[data-route="compose"] .app-screen { padding-top: var(--pt-safe-top); }
+
+body[data-route="paste"] .app-screen {
+  padding-top: calc(var(--pt-space-4) + var(--pt-safe-top));
+}
 
 .app-screen:focus { outline: none; }
 
@@ -241,18 +352,50 @@ body[data-route="compose"] .app-screen { padding: 0; overflow: hidden; }
 
 /* Bottom bar -------------------------------------------------------------- */
 
+/* THE GUTTER UNDER THE BUTTONS. Corrected 2026-08-09.
+ *
+ * What this was: `padding-bottom: var(--pt-safe-bottom)` on a bar whose
+ * min-height was --pt-bottom-h (64) around a single 52px child, centred. That
+ * is 6px of clearance above the action bar and 6px below it, and then whatever
+ * env() reports.
+ *
+ * Measured on the deployed build: the hero button's bottom edge sat 6px from
+ * the bottom of the viewport. On an iPhone that is 6px plus a 34px inset and it
+ * passes. Everywhere else env() resolves to 0 -- Android Chrome in a tab,
+ * desktop, any phone without a home indicator -- and 6px is what the user gets.
+ * On a gesture-navigation Android that puts the primary action of the app
+ * inside the strip the system reserves for its own back and home swipes.
+ *
+ * Two changes:
+ *
+ *   --pt-bottom-h is now 52, equal to --pt-action-h, so the bar's box is its
+ *   child and the 12px of undocumented slack between the two tokens is gone.
+ *   That slack was also the reason tokens.css's stage-budget arithmetic was
+ *   wrong by 12px; see the note there.
+ *
+ *   The bottom padding is a floor, not a passthrough. max() means the inset
+ *   wins where there is one, and 16px applies where there is not. An iPhone
+ *   sees no change from this line; every other device gets a gutter.
+ *
+ * Net against the old rule: the stage GAINS 12px on an inset device and loses
+ * 4px on a flat one, so the 3:4 art stays width-bound on a 390px phone either
+ * way. That was the constraint; see --pt-chrome-bot. */
 .app-bottom {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--pt-space-3);
-  padding: 0 calc(var(--pt-space-4) + var(--pt-safe-right)) var(--pt-safe-bottom) calc(var(--pt-space-4) + var(--pt-safe-left));
+  padding:
+    0
+    calc(var(--pt-space-4) + var(--pt-safe-right))
+    max(var(--pt-safe-bottom), var(--pt-space-4))
+    calc(var(--pt-space-4) + var(--pt-safe-left));
   background: var(--pt-bg);
 }
 
 /* Empty is the default state, and it must collapse rather than leave a bar. */
 .app-bottom:not(:empty) {
-  min-height: calc(var(--pt-bottom-h) + var(--pt-safe-bottom));
+  min-height: calc(var(--pt-bottom-h) + max(var(--pt-safe-bottom), var(--pt-space-4)));
 }
 
 /* No top border on the picture screens. The bar sits on the same black plane as

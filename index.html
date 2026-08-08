@@ -6,7 +6,13 @@
      U+2800 and Block Elements. A late or missing charset turns every one of
      them into mojibake before any script runs. -->
 <title>Plane Text</title>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- viewport-fit=cover is what makes env(safe-area-inset-*) report real numbers;
+     without it they are 0 and the bottom bar sits under the home indicator.
+     interactive-widget=resizes-content makes the on-screen keyboard shrink the
+     layout viewport rather than pan it, so the paste screen's fallback field
+     scrolls into view instead of the whole frame sliding up and taking the
+     action bar off the bottom of the screen with it. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="description" content="Send photographs as plain text, for networks that pass text but block images.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#000000">

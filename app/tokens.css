@@ -144,7 +144,21 @@
   --pt-art-w: 100%;
 
   --pt-header-h: 48px;
-  --pt-bottom-h: 64px;
+
+  /* The bottom bar's box. CHANGED 2026-08-09, 64 -> 52.
+   *
+   * It is now exactly --pt-action-h, because the bar has exactly one child and
+   * that child is the action bar. The 12px it used to carry beyond its content
+   * was never decided; it was the difference between two numbers nothing
+   * compared. It bought 6px of clearance above the buttons and 6px below, and
+   * 6px below is not clearance, it is a rounding error -- see the gutter note
+   * in shell.css for what that measured on a real device.
+   *
+   * Breathing room under the buttons is now the bar's bottom PADDING, floored
+   * at --pt-space-4 and rising to the safe-area inset where there is one. That
+   * is the honest place for it: it is a gutter against the edge of the screen,
+   * not part of the bar. */
+  --pt-bottom-h: 52px;
 
   /* ------------------------------------------------------------------------
    * THE RESERVED STAGE BAND. Added 2026-08-09, from the UX review's §1.
@@ -184,15 +198,78 @@
    * more row in the bottom band and the picture starts shrinking on the
    * commonest phone size. 194px is the hard ceiling; 176 is the working room.
    *
+   * THAT ARITHMETIC WAS WRONG, AND IS NOW RIGHT. Corrected 2026-08-09.
+   *
+   * It subtracted 52, --pt-action-h, the height of the BUTTONS. What the layout
+   * reserved was --pt-bottom-h, then 64, the height of the BAR AROUND them. So
+   * every figure above was 12px optimistic: the container was 746 rather than
+   * 758, the stage 526 rather than 538, and the headroom over the 520px the art
+   * needs was 6px, not 18. The hard ceiling on this token was 182, not 194.
+   *
+   * Nothing was visibly broken, which is why it survived: 6px of slack still
+   * leaves the art width-bound. But the margin was a third of what the comment
+   * promised, and the next person to spend "the remaining 18px" would have shrunk
+   * the picture on the commonest phone in the world.
+   *
+   * --pt-bottom-h is now 52 and the bar's gutter is padding floored at 16px, so
+   * the numbers above are finally the numbers the layout uses:
+   *
+   *   inset device   844 - (52 + 34) = 758  ->  stage 538, headroom 18
+   *   flat device    844 - (52 + 16) = 776  ->  stage 556, headroom 36
+   *
+   * The inset case is what the paragraph above always claimed, arrived at
+   * honestly. It is also the tighter of the two, so it stays the one to size
+   * against.
+   *
    * Change either number and every picture screen moves together, which is the
    * point. Do not override them per route.
    * --------------------------------------------------------------------- */
   --pt-chrome-top: 44px;
   --pt-chrome-bot: 176px;
 
-  /* The action bar's own height. Taller than --pt-bottom-h's minimum because
-   * the hero carries a bracket glyph at display size. */
+  /* The action bar's own height. Sized by the hero, which carries a bracket
+   * glyph at display size.
+   *
+   * Equal to --pt-bottom-h as of 2026-08-09, and that is the point rather than
+   * a coincidence: the bar's box is now exactly its one child, and the room
+   * under the buttons is the bar's bottom padding. The old comment here read
+   * "taller than --pt-bottom-h's minimum", which had it backwards -- 52 is
+   * shorter than the 64 that token used to carry, and the 12px difference was
+   * the undocumented slack that became 6px of clearance under the primary
+   * action of the app. */
   --pt-action-h: 52px;
+
+  /* THE RECENT-MESSAGE THUMBNAIL, one size for the whole app.
+   * Added 2026-08-09.
+   *
+   * There were two. The viewer's carousel strip drew 30 x 40 and the open
+   * screen's recents strip drew 46 x 60, for the same eight entries out of the
+   * same recents.js cache, so the same message was two different objects
+   * depending on which screen you were looking at. Nothing chose that; the two
+   * strips were written at different times and neither knew about the other.
+   *
+   * 3:4, like everything else the app renders, which 46 x 60 was not (46 x 4/3
+   * is 61.3, so the open screen's thumbnails were squeezed by a pixel and a
+   * bit).
+   *
+   * WHY 36 x 48 AND NOT 46 x 60. The viewer's strip lives inside
+   * --pt-chrome-bot, which is a fixed reserved band, and the band is full:
+   * fit line 21 + chars 18 + slider 44 + strip 44 + status 18, four 4px gaps
+   * and 4px of padding-top, is 165 of the 176 available. Eleven pixels spare.
+   *
+   * A 60px box makes the strip 64 (60 + 3px padding + 1px underline) and the
+   * band 185, which does not fit, and growing the band to fit costs the
+   * picture: after the bottom-gutter fix the stage has 18px of headroom over
+   * the 520px a full-width 3:4 art needs on a 390px phone, and this would want
+   * 20. Two pixels short of free.
+   *
+   * So the shared size is the largest 3:4 box the tighter consumer can hold:
+   * 48 makes the strip 52 and the band 173, three pixels inside the budget.
+   * The viewer's thumbnails get bigger, which is the screen where the mis-tap
+   * was reported; the open screen's get smaller, which is the screen with room
+   * to spare and no band to overflow. */
+  --pt-thumb-w: 36px;
+  --pt-thumb-h: 48px;
 
   /* Safe areas. viewport-fit=cover is set in index.html, so these are live.
    * Without it env() resolves to 0 and the bottom bar sits under the home

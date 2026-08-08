@@ -404,6 +404,59 @@ export default register(defineScreen({
       scrollStripTo(at);
     }
 
+    // --- arming ----------------------------------------------------------
+    //
+    // Delete is two taps, the second on a different glyph, exactly as CLEAR ALL
+    // in settings.js is two taps on a different word. There is no undo, and
+    // these are the only destructive controls in the app.
+    //
+    // This is what pays for the 22px hit box in compose.css: the button is now
+    // small enough to miss, so it has to be harmless to hit. Missing it costs a
+    // tap; hitting it costs a tap.
+    //
+    // One armed control at a time, and it disarms on the next pointerdown that
+    // is not on it: selecting another thumbnail, swiping the picture, moving
+    // the slider, opening the save sheet. Capture phase on the screen root, so
+    // it runs before the click that acts on any of those. `contains` rather
+    // than `===`: the button holds one bare character today, and a tap on
+    // whatever it holds tomorrow is still a tap on the button.
+    //
+    // 3000ms is settings.js's window for the same decision. Two disarm timings
+    // for one idiom would be two idioms.
+    const ARM_MS = 3000;
+    let armedDel = null;
+    let armedName = '';
+    let armTimer = 0;
+
+    function disarm() {
+      clearTimeout(armTimer);
+      armTimer = 0;
+      if (!armedDel) return;
+      armedDel.dataset.armed = '';
+      armedDel.textContent = '×';
+      armedDel.setAttribute('aria-label', `Delete ${armedName}`);
+      armedDel = null;
+      armedName = '';
+    }
+
+    // The label changes with the glyph. A screen reader user gets no colour and
+    // no ✓, so without this the control announces itself as Delete twice and
+    // the second announcement is the one that fires.
+    function arm(del, name) {
+      disarm();
+      armedDel = del;
+      armedName = name;
+      del.dataset.armed = '1';
+      del.textContent = '✓';
+      del.setAttribute('aria-label', `Confirm deleting ${name}`);
+      armTimer = setTimeout(disarm, ARM_MS);
+    }
+
+    root.addEventListener('pointerdown', (e) => {
+      if (armedDel && !armedDel.contains(e.target)) disarm();
+    }, { signal: ctx.signal, capture: true });
+    ctx.signal.addEventListener('abort', () => clearTimeout(armTimer), { once: true });
+
     // --- the strip -------------------------------------------------------
     const stripButtons = new Map();
 
@@ -413,6 +466,10 @@ export default register(defineScreen({
     }
 
     function renderStrip() {
+      // Before replaceChildren(), because the button the arming state points at
+      // is about to stop existing and its timer would then disarm a detached
+      // node while the strip shows nothing armed.
+      disarm();
       strip.replaceChildren();
       stripButtons.clear();
       entries = recents.list();
@@ -445,6 +502,16 @@ export default register(defineScreen({
         del.textContent = '×';
         del.addEventListener('click', (e) => {
           e.stopPropagation();
+          if (del.dataset.armed !== '1') {
+            arm(del, entry.name);
+            // The status line says what one character cannot. It is transient
+            // at 2600ms against a 3000ms window, so it leaves fractionally
+            // early: the button is the state of record, the line is a caption
+            // on it.
+            say(`Tap again to delete ${entry.name.split(' ')[0]}`);
+            return;
+          }
+          disarm();
           const wasViewing = entry.name === viewName;
           recents.remove(entry.name);
           say(`Deleted ${entry.name.split(' ')[0]}`);
