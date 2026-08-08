@@ -30,9 +30,19 @@ import { baseLineHeight } from '../src/sizing.js';
 // 4/3 x 390 = 520 tall, so height binds and the art is narrower than the
 // screen. On a desktop window width usually binds. The minimum handles both
 // without a breakpoint.
-export function fitFontSize({ codec, cols, rows }, boxW, boxH) {
-  const advance = advanceCssFor(codec);
-  const lh = baseLineHeight(codec);
+// `advance` may be overridden by a caller that has MEASURED it rather than
+// inheriting the CSS baseline. The <pre> path cannot: it sets a font size and
+// finds out afterwards. The canvas viewfinder can, because it has to measure
+// the advance anyway to size the atlas cell, and feeding a stale guess in here
+// would size the canvas for a glyph width the atlas does not use -- the art
+// would overflow its stage on any font whose real advance runs wide, which
+// Block Elements does by 18% on a Pixel.
+//
+// This stays the ONLY implementation of the fit arithmetic. The alternative was
+// the viewfinder computing its own min-of-two-constraints, and every geometry
+// figure written out twice in this project has drifted from its original.
+export function fitFontSize({ codec, cols, rows }, boxW, boxH, advance = advanceCssFor(codec)) {
+  const lh = baseLineHeight(codec, advance);
   return Math.min(boxW / (cols * advance), boxH / (rows * lh));
 }
 

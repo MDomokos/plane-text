@@ -13,7 +13,7 @@ import {
   INVERT_DEFAULT, RAMP_CLIP_MAX, RAMP_ENTROPY_MIN,
 } from './constants.js';
 import { rampHealth } from './metrics.js';
-import { toLuma, unsharp, autoLevels, gamma } from './tone.js';
+import { toLuma, unsharp, measureLevels, applyLevels, gamma } from './tone.js';
 import { buildGrid, gridToRows } from './cells.js';
 import { buildMessage, wrapperCost } from './wrap.js';
 import { defaultCols, rowsFor, describe, legibleColsFor } from './sizing.js';
@@ -91,7 +91,37 @@ export function encode(rgba, srcW, srcH, opts = {}) {
 
   let luma = toLuma(rgba, srcW, srcH);
   if (tone.unsharp) luma = unsharp(luma, srcW, srcH, tone.unsharp, 1);
-  luma = autoLevels(luma, tone.clipLo, tone.clipHi);
+
+  // Auto-levels, with the endpoints optionally supplied by the caller.
+  //
+  // `opts.levels = { lo, hi }` skips the percentile pass entirely. Only the
+  // live viewfinder uses it (spec 5.8): it smooths the endpoints with an EMA
+  // across frames so the preview does not pulse as the subject moves, which
+  // needs endpoints that outlive a single frame. It is also the expensive step
+  // -- a full sort of the luma buffer -- so skipping it on most frames is where
+  // the frame budget comes back.
+  //
+  // A still capture must NOT pass this. Spec 5.8: "capture uses the still
+  // image's own un-smoothed levels, computed fresh at full resolution. The
+  // preview approximates; the capture is correct." Default is undefined, so
+  // every existing caller measures as before.
+  //
+  // Note the endpoints live in post-unsharp space, which is why they are
+  // reported back rather than left for the caller to recompute. Feeding an EMA
+  // from a differently-derived measurement would drift.
+  // `opts.reportLevels` is the other half, and it exists because measuring and
+  // applying are genuinely separate needs for a smoothed preview. A viewfinder
+  // frame wants to be RENDERED with the smoothed endpoints and still learn what
+  // this frame's own endpoints were, or the EMA has nothing to average. Without
+  // this flag the only way to feed it is to render an unsmoothed frame
+  // periodically, which pulses -- the exact artefact the smoothing is for.
+  const supplied = Boolean(opts.levels && Number.isFinite(opts.levels.lo) && Number.isFinite(opts.levels.hi));
+  const rawLevels = (!supplied || opts.reportLevels)
+    ? measureLevels(luma, tone.clipLo, tone.clipHi)
+    : null;
+  const levels = supplied ? { lo: opts.levels.lo, hi: opts.levels.hi } : rawLevels;
+  luma = applyLevels(luma, levels.lo, levels.hi);
+
   if (tone.gamma !== 1) luma = gamma(luma, tone.gamma);
   luma = compress(luma, tone.compress);
 
@@ -167,6 +197,13 @@ export function encode(rgba, srcW, srcH, opts = {}) {
       health,
       invert,
       tone,
+      // The clip endpoints actually used, in post-unsharp space, and whether
+      // they were measured here or handed in. The viewfinder's EMA reads these.
+      levels,
+      levelsSupplied: supplied,
+      // This frame's own endpoints, whether or not they were the ones used.
+      // null when nothing was measured. The viewfinder's EMA reads this.
+      rawLevels,
     },
   };
 }
