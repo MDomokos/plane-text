@@ -7,6 +7,7 @@ build/
 *.bmp
 Test?D*.html
 test-d*.html
+*.tmp.mjs
 
 # Source photographs. Untracked by choice
 images/
