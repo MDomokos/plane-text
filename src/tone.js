@@ -22,35 +22,7 @@ export function toLuma(rgba, w, h) {
 // Percentile clip. The failure on flat images is not too many grey levels, it
 // is that the histogram only occupies a third of the ramp, so redistribute
 // rather than discard (spec: auto-levels, not posterization).
-//
-// ---------------------------------------------------------------------------
-// SPLIT INTO MEASURE AND APPLY, 2026-08-09, for the live viewfinder (spec 5.8).
-//
-// `autoLevels` is unchanged in behaviour and remains the only thing the
-// encoder's default path calls. What is new is that the two halves are now
-// separable, because the viewfinder needs to do something the still encoder
-// never does: reuse endpoints across frames.
-//
-// Per-frame auto-levels FLICKERS. As the subject moves the 2nd and 98th
-// percentiles shift, the mapping jumps, and the whole image pulses. Spec 5.8
-// smooths the endpoints rather than the pixels, with an EMA over roughly ten
-// frames. That is impossible against a function that computes its endpoints
-// internally and returns only pixels.
-//
-// This is an unfreeze of `src/`, which SHELL.md rule 1 forbids, and it is
-// deliberate. The alternative was a second tone chain in `app/`, and the README
-// opens with five instances of exactly that shape -- a harness drifting from
-// the artefact it tests. A second chain would have been a sixth. The unfreeze
-// is additive: no existing signature changed, no existing behaviour changed,
-// and no device-measured constant is touched. Logged in SHELL.md.
-//
-// The viewfinder calls measureLevels() on some frames and applyLevels() on
-// every frame; the encoder calls autoLevels() and is unaffected.
-// ---------------------------------------------------------------------------
-
-// Find the clip endpoints. Separated from the application so a caller that
-// wants to smooth, cache or skip the measurement can.
-export function measureLevels(luma, lowPct = 2, highPct = 98) {
+export function autoLevels(luma, lowPct = 2, highPct = 98) {
   const sorted = Float64Array.from(luma).sort();
   let lo = sorted[Math.floor((lowPct / 100) * (sorted.length - 1))];
   let hi = sorted[Math.floor((highPct / 100) * (sorted.length - 1))];
@@ -69,16 +41,9 @@ export function measureLevels(luma, lowPct = 2, highPct = 98) {
     lo = sorted[0];
     hi = sorted[sorted.length - 1];
   }
-  return { lo, hi };
-}
-
-// Rescale a buffer to given endpoints. A span of zero passes the input through
-// rather than inventing a value -- see the note above, this is the branch that
-// once deleted the image.
-export function applyLevels(luma, lo, hi) {
   const span = hi - lo;
   const out = new Float64Array(luma.length);
-  if (!(span > 1e-6)) {
+  if (span < 1e-6) {
     out.set(luma);
     return out;
   }
@@ -86,11 +51,6 @@ export function applyLevels(luma, lo, hi) {
     out[i] = Math.min(1, Math.max(0, (luma[i] - lo) / span));
   }
   return out;
-}
-
-export function autoLevels(luma, lowPct = 2, highPct = 98) {
-  const { lo, hi } = measureLevels(luma, lowPct, highPct);
-  return applyLevels(luma, lo, hi);
 }
 
 export function gamma(luma, g = 1.2) {

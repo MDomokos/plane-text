@@ -68,49 +68,28 @@
   background: var(--pt-art-bg);
 }
 
-/* The art. A CANVAS on this screen, not a <pre> -- see the header of
- * capture.js for why this screen is the exception and compose and paste are
- * not.
+/* The art. font-size and line-height are set from JS by art.js, computed from
+ * the imported advance and line-height for the codec. Never here, and never
+ * from a value typed into CSS.
  *
- * Its width and height attributes are device pixels and its CSS width and
- * height are the fitted size; both are set from JS, from the MEASURED advance
- * and the imported line-height. Never here, and never from a value typed into
- * CSS.
+ * width:max-content matters for the reason it does in the wrapper: without it
+ * the element clamps to its container and an under-filling grid measures as a
+ * perfect fit.
  *
- * image-rendering:pixelated is not a style choice. The backing store is sized
- * at devicePixelRatio so the blit is 1:1, and on a fractional DPR the browser
- * still resamples on the way to the screen. Smoothing that resample softens
- * every glyph edge -- which is precisely the antialiased coverage the atlas
- * exists to preserve (spec 5.7 rule 1), thrown away one step after we went to
- * the trouble of keeping it. */
+ * font-kerning and ligatures off: a font that alters advance between adjacent
+ * cells would shear the grid rather than stretch it, and that is the one font
+ * failure with no recovery. */
 .sc-art {
-  display: block;
   margin: 0;
-  background: var(--pt-art-bg);
-  image-rendering: pixelated;
+  width: max-content;
+  white-space: pre;
+  font-family: var(--pt-mono);
+  color: var(--pt-art-ink);
+  font-kerning: none;
+  font-variant-ligatures: none;
+  text-size-adjust: none;
+  -webkit-text-size-adjust: none;
   user-select: none;
-}
-
-/* No camera. Not an error layout: declining the permission leaves the library
- * one tap away in the action bar below, and spec 8's copy already promises
- * that escape. This is a notice sitting where the picture would be. */
-.sc-notice {
-  max-width: 28ch;
-  padding: var(--pt-space-4);
-  text-align: center;
-}
-
-.sc-notice-title {
-  margin: 0 0 var(--pt-space-2);
-  font-size: var(--pt-size-sm);
-  color: var(--pt-ink);
-}
-
-.sc-notice-body {
-  margin: 0;
-  font-size: var(--pt-size-xs);
-  line-height: 1.5;
-  color: var(--pt-ink-faint);
 }
 
 /* Readout ------------------------------------------------------------------ */
