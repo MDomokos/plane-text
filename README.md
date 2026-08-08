@@ -1,47 +1,40 @@
 # Plane Text
 
-A PWA that sends photographs as plain text, for networks that pass text
-messages but block images — chiefly in-flight wifi.
+Turns a photo into plain text so you can send it over networks that carry
+messages but block images. Mostly this means in-flight wifi.
 
-A photo is reduced to a grid of characters (braille, block elements, or an
-ASCII ramp) that fits in a single message and stays readable on a phone screen
-without zooming. Roughly 108 columns, about 4,500 characters.
+The photo becomes a grid of characters, either a calibrated ASCII ramp or
+braille dots, that fits in a single message and stays readable on a phone
+without zooming. The default is 65 columns and about 5,700 characters, and the
+size slider goes up to 130 columns and about 22,700.
 
-Status: in development.
+It installs as a web app and works offline, so it still runs once you are on
+the plane.
+
 
 ## Running it
 
-No dependencies, no build step, no framework.
 
 ```
-npm test                                            # unit tests
-node tools/encode-cli.js photo.jpg --sweep          # grid sizes vs character cost
-node tools/encode-cli.js photo.jpg -o out/msg.txt   # encode a message
-node tools/verify-render.js photo.jpg 108 out/x.pgm # decode the text back to dots
+npm run serve
 ```
 
-Serve `index.html` from any static server to run the app.
+Then open http://localhost:8080/plane-text/ (the script serves the parent
+directory, so the app sits at that sub-path, same as on GitHub Pages).
 
-BMP and PPM are read natively. Other formats go through python3 + Pillow.
+To encode a photo from the command line:
 
-## Layout
+```
+node tools/encode-cli.js photo.jpg -o out/msg.txt
+```
 
-| Path | Contents |
-|---|---|
-| `src/constants.js` | Budget and geometry figures, defined once |
-| `src/sizing.js` | Character range, columns per codec, line-height, aspect error |
-| `src/tone.js` | Luminance, unsharp, auto-levels, gamma, downscale, dither |
-| `src/cells.js` | Pixels to cell grid to text rows, and back |
-| `src/wrap.js` | The `<pre>` wrapper and the fit shim |
-| `src/calibrate.js` | Ramp selection from measured glyph coverage |
-| `src/styles.js` | Codec, charset and tone presets |
-| `src/lint.js` | Banned-character and leading-whitespace checks |
-| `src/encode.js` | The pipeline |
-| `app/` | PWA shell: routing, state, screens |
-| `tools/` | CLI harnesses for encoding, benchmarking and verification |
-| `test/` | Unit tests |
+BMP and PPM are read directly. Other formats need python3 and Pillow.
 
-Nothing in `src/` touches the DOM, so it all runs in Node.
+Tests:
+
+```
+npm test
+```
 
 ## License
 
