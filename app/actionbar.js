@@ -33,6 +33,8 @@
 // is the guard. It is opt-in rather than automatic, because a bar built in
 // response to a deliberate navigation should not make the user wait.
 
+import { reduced } from './motion.js';
+
 const MIN_TAP = 44;          // iOS HIG. Android's 48dp is checked at review.
 const REF_VIEWPORT = 390;    // Layout sanity check only. Not a geometry figure
                              // the encoder shares, so not imported from src/.
@@ -174,9 +176,7 @@ export function actionBar(host, slots, { signal = null } = {}) {
   // Under prefers-reduced-motion it resolves immediately rather than playing a
   // shorter animation, because a 110ms clamp cut down is a flicker.
   function fire() {
-    const reduced = typeof matchMedia === 'function'
-      && matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduced) return Promise.resolve();
+    if (reduced()) return Promise.resolve();
     hero.classList.add('is-firing');
     return new Promise((resolve) => {
       const t = setTimeout(() => { hero.classList.remove('is-firing'); resolve(); }, 230);

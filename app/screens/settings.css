@@ -98,8 +98,26 @@
  * only once armed: a red button sitting on the screen reads as a warning about
  * the screen rather than about the action. */
 .sc-set-btn.is-danger[data-armed="1"] {
+  position: relative;
   box-shadow: inset 0 0 0 1px var(--pt-error);
   color: var(--pt-error);
+}
+
+/* The arming window, drawn. The reasoning is written out once, at .pt-del in
+ * thumbstrip.css; this is the same idiom on the app's other armed control and
+ * it has to say the same thing or the two disagree about what TAP AGAIN means.
+ * The keyframe is that file's, since it ships on every route. The duration
+ * comes from settings.js, from the constant that drives the actual disarm. */
+.sc-set-btn.is-danger[data-armed="1"]::after {
+  content: "";
+  position: absolute;
+  left: var(--pt-space-4);
+  right: var(--pt-space-4);
+  bottom: var(--pt-space-1);
+  height: 1px;
+  background: var(--pt-error);
+  transform-origin: left center;
+  animation: pt-arm-drain var(--pt-arm-ms, 3000ms) linear forwards;
 }
 
 /* A choice group. Words with a gold underline on the active one, the same

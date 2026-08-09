@@ -262,7 +262,54 @@
  * on this route, so nothing is lost by taking it. */
 .sc-stage {
   touch-action: none;
+  /* The containing block for .sc-warmup below, and nothing else. See that rule
+   * for why the one absolutely positioned element on this screen is contained
+   * to the stage rather than to the frame. */
+  position: relative;
 }
+
+/* THE WARM-UP. Added 2026-08-09.
+ *
+ * A field of ramp glyphs over the canvas while getUserMedia is still opening, so
+ * a return to this screen never shows an empty stage. capture.js owns when it
+ * appears; this owns what it looks like.
+ *
+ * THE ONE position:absolute ON A PICTURE SCREEN, and it is deliberate rather
+ * than convenient. shell.css says of .app-frame that "nothing here is
+ * position:absolute, so a screen cannot quietly float something over the
+ * picture", and that rule is about the frame's three bands. This is inside the
+ * stage, covers exactly the stage, and is gone within a second.
+ *
+ * It has to overlay rather than replace. .sc-notice hides the canvas because
+ * there is not going to be a picture; here there is, in a moment, and
+ * startViewfinder() has to measure a canvas that has a box. A `hidden` canvas
+ * has none, and the viewfinder would size itself to zero.
+ *
+ * DIM, at --pt-ink-faint rather than --pt-art-ink. The art is white on black and
+ * this must not be mistaken for it: it is chrome describing a wait, and the
+ * moment the real frame lands the picture should visibly brighten into place.
+ * That contrast step is the feedback that the camera arrived. */
+.sc-warmup {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: pre;
+  font-family: var(--pt-mono);
+  /* Set from JS, from the measured stage. Never typed here, for the reason the
+   * canvas rule below gives about its own dimensions. */
+  line-height: 1;
+  color: var(--pt-ink-faint);
+  opacity: 0.55;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  user-select: none;
+  pointer-events: none;   /* the style swipe still works through it */
+}
+.sc-warmup[hidden] { display: none; }
 
 /* The art. A canvas on this screen rather than a <pre>; see the header of
  * capture.js for why this screen is the exception.
@@ -364,6 +411,26 @@
   touch-action: manipulation;
 }
 .sc-notice-retry:hover { box-shadow: inset 0 0 0 1px var(--pt-line-strong); color: var(--pt-ink); }
+
+/* The library button, which is the action that always works when this notice is
+ * on screen. Brighter ink and a full-strength hairline, one step above the
+ * retry beneath it.
+ *
+ * Not gold. The hero in the action bar is this screen's one accent, and
+ * tokens.css is most insistent about exactly this: if two things on a screen are
+ * gold, one of them is wrong. A notice that outranked the shutter would also be
+ * saying the wrong thing -- the camera is still the point, this is the way past
+ * a camera you cannot have. */
+.sc-notice-retry.is-primary {
+  color: var(--pt-ink);
+  box-shadow: inset 0 0 0 1px var(--pt-line-strong);
+}
+.sc-notice-retry.is-primary:hover { color: var(--pt-ink); box-shadow: inset 0 0 0 1px var(--pt-ink); }
+
+/* Stacked, and the gap is the margin already on each. Two --pt-tap buttons plus
+ * the title and body fit the stage on the smallest viewport the app renders on:
+ * at 320 x 568 the stage is 280px and this notice is about 210. */
+.sc-notice-retry + .sc-notice-retry { margin-top: var(--pt-space-2); }
 .sc-notice-retry[hidden] { display: none; }
 .sc-notice-retry:disabled { opacity: 0.4; cursor: default; }
 

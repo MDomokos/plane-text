@@ -358,6 +358,8 @@
  * ========================================================================== */
 .pt-del {
   flex: none;
+  /* For the draining rule below. Nothing else in this control is positioned. */
+  position: relative;
   /* The floor the rest of the app is held to, met head-on this time. */
   min-height: var(--pt-tap);
   min-width: calc(var(--pt-tap) * 2);
@@ -415,6 +417,46 @@
  * control is one of three and the other two have one. It stays quiet -- faint
  * ink, no fill -- which is the half of the old treatment that was about the
  * ACTION rather than about the corner it lived in. */
+/* THE WINDOW, DRAWN. Added 2026-08-09.
+ *
+ * The arming lasts ARM_MS and nothing said so. "TAP AGAIN" is a promise with a
+ * deadline attached and the deadline was invisible, so the disarm read as the
+ * button changing its mind: the user looks at the picture to decide, looks
+ * back, and the word has silently gone from TAP AGAIN to DELETE. A second tap
+ * then arms instead of deleting, which is the good failure -- but the user does
+ * not know that, and the observable event is a delete button that ignored a
+ * tap.
+ *
+ * A 1px rule under the label, draining left to right over the window. A
+ * hairline is the only thing this design system has that can carry a quantity
+ * -- there is no fill, no bar, no progress component, and inventing one for
+ * three seconds of a confirm would be a new object in the vocabulary. It is
+ * --pt-error because the ring and the ink already are; a second colour would
+ * make the countdown a separate event from the arming.
+ *
+ * transform, not width, so it is one compositor property and does not lay out
+ * a control that is inside a fixed 176px band.
+ *
+ * THE DURATION COMES FROM JS AND MUST. ARM_MS is the timer that actually
+ * disarms the button; a `3000ms` written here would be a second copy of it,
+ * and a countdown that finishes at a different moment from the thing it counts
+ * is worse than no countdown -- it would be a bar that empties while the button
+ * is still armed, or an armed button under an empty bar. thumbstrip.js sets
+ * --pt-arm-ms on the element from ARM_MS itself. The fallback is only for a
+ * DOM built by something that did not. */
+.pt-del[data-armed="1"]::after {
+  content: "";
+  position: absolute;
+  left: var(--pt-space-2);
+  right: var(--pt-space-2);
+  bottom: var(--pt-space-1);
+  height: 1px;
+  background: var(--pt-error);
+  transform-origin: left center;
+  animation: pt-arm-drain var(--pt-arm-ms, 3000ms) linear forwards;
+}
+@keyframes pt-arm-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
 .pt-del.is-fill {
   flex: 1 1 0;
   min-width: 0;

@@ -6,7 +6,7 @@
 //   importScripts('app/precache-manifest.classic.js');
 //   self.PRECACHE.map(function (p) { return new URL(p, self.location).href; });
 
-self.PRECACHE_VERSION = 'pt-19b3facd5e91';
+self.PRECACHE_VERSION = 'pt-7a02b9e01dd9';
 
 self.PRECACHE = [
   'app/actionbar.css',
@@ -23,7 +23,9 @@ self.PRECACHE = [
   'app/icon.svg',
   'app/main.js',
   'app/mock.js',
+  'app/motion.js',
   'app/offline.js',
+  'app/photopicker.js',
   'app/pipeline.js',
   'app/precache-manifest.classic.js',
   'app/precache-manifest.js',

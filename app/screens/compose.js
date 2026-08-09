@@ -74,6 +74,7 @@ import { messageName } from '../words.js';
 import * as recents from '../recents.js';
 import { thumbStrip } from '../thumbstrip.js';
 import { encodePhoto, getSubject, clearSubject, decodeMessage } from '../pipeline.js';
+import { flash } from '../motion.js';
 
 // SAVE_FORMATS, the save sheet, download(), renderPng() and share() are
 // app/artefact.js as of 2026-08-09. They were all inside mount() below, closed
@@ -312,11 +313,17 @@ export default register(defineScreen({
       status.textContent = text;
       status.classList.toggle('is-warn', kind === 'warn');
       status.classList.toggle('is-error', kind === 'error');
+      // See motion.js. It matters more on this screen than the other two: the
+      // transient expiring RESTORES the sticky warning, and a warning
+      // reappearing with no motion at all is the one status change a user is
+      // most likely to miss, because they have already read that string once.
+      flash(status);
       if (!sticky && text) {
         statusTimer = setTimeout(() => {
           status.textContent = stickyStatus;
           status.classList.toggle('is-warn', stickyKind === 'warn');
           status.classList.toggle('is-error', stickyKind === 'error');
+          flash(status);
         }, 2600);
       }
     }

@@ -79,15 +79,15 @@ import { messageName, currentWord } from '../words.js';
 import * as recents from '../recents.js';
 import { thumbStrip } from '../thumbstrip.js';
 import { artefact } from '../artefact.js';
+import { photoPicker } from '../photopicker.js';
 import { decodeMessage, looksLikeMessage, setSubject, takeSharedText } from '../pipeline.js';
+import { flash } from '../motion.js';
 
-// Longest edge a picked photo is decoded at.
-//
-// The grid is at most 130 cells wide and each cell samples a block of pixels,
-// so anything past ~1600 px is thrown away by downscale() a moment later. It is
-// not free to keep: toLuma() allocates one Float64Array element per pixel, so a
-// 12 MP photo costs 96 MB to produce a 130-column picture.
-const MAX_SOURCE_PX = 1600;
+// The system picker and the File -> RGBA decode are app/photopicker.js as of
+// 2026-08-09. They were sixty lines of this file, and capture needed all of
+// them for the button in its camera-denied notice: spec 8 has promised that
+// escape hatch since before either screen existed, and until now it was a
+// sentence pointing at a slot that goes somewhere else.
 
 // The explainer under the big target, and the only new copy on the screen.
 //
@@ -302,29 +302,24 @@ export default register(defineScreen({
     status.setAttribute('role', 'status');
     bottom.append(status);
 
-    // The real picker. Hidden, and clicked by the action bar's middle slot, so
-    // there is no styled control for it to fight with.
-    //
-    // A fourth child of .app-frame, which is a three-row grid. `hidden` is
-    // `display: none`, and a display:none child is not a grid item at all, so
-    // this cannot open an implicit fourth row.
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = 'image/*';
-    fileInput.hidden = true;
-
-    root.append(top, stage, bottom, fileInput);
+    root.append(top, stage, bottom);
 
     // --- status ----------------------------------------------------------
     // Transient only. The viewer has a sticky variant for decode warnings; see
     // the stage section below for why this screen does not.
     let statusTimer = 0;
+    // flash(): see motion.js, and capture.js's say() for the same three lines.
+    // The triplication of say() across the three picture screens predates this
+    // and is worth removing; it is not removed HERE, in a change about motion,
+    // because a shared status component is a DOM change that would want its own
+    // review.
     function say(text, kind = '') {
       status.textContent = text;
       status.classList.toggle('is-warn', kind === 'warn');
       status.classList.toggle('is-error', kind === 'error');
+      flash(status);
       clearTimeout(statusTimer);
-      if (text) statusTimer = setTimeout(() => { status.textContent = ''; }, 2600);
+      if (text) statusTimer = setTimeout(() => { status.textContent = ''; flash(status); }, 2600);
     }
     ctx.signal.addEventListener('abort', () => clearTimeout(statusTimer), { once: true });
 
@@ -537,50 +532,15 @@ export default register(defineScreen({
     }, { signal: ctx.signal });
 
     // --- a photo you already have ----------------------------------------
-
-    // Decode a picked file to the { rgba, width, height } shape the encoder
-    // wants. This is the same shape the camera will hand over, so nothing
-    // downstream distinguishes the two sources.
     //
-    // Two options on createImageBitmap earn their place. `imageOrientation:
-    // 'from-image'` applies the EXIF rotation, without which every photo taken
-    // in portrait on a phone arrives sideways and gets cropped to 3:4 along the
-    // wrong axis. `resizeWidth/Height` does the downscale in the decoder rather
-    // than on a canvas, so a 12 MP photo never exists at full size in memory:
-    // toLuma() would otherwise allocate a 12-million-element Float64Array, 96 MB,
-    // to produce a grid that is at most 130 cells wide.
-    async function photoFromFile(file) {
-      const probe = await createImageBitmap(file, { imageOrientation: 'from-image' });
-      const scale = Math.min(1, MAX_SOURCE_PX / Math.max(probe.width, probe.height));
-      const w = Math.max(1, Math.round(probe.width * scale));
-      const h = Math.max(1, Math.round(probe.height * scale));
-      probe.close?.();
-
-      const bitmap = await createImageBitmap(file, {
-        imageOrientation: 'from-image',
-        resizeWidth: w,
-        resizeHeight: h,
-        resizeQuality: 'high',
-      });
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const g = canvas.getContext('2d');
-      g.drawImage(bitmap, 0, 0);
-      bitmap.close?.();
-      return { rgba: g.getImageData(0, 0, w, h).data, width: w, height: h };
-    }
-
-    fileInput.addEventListener('change', async () => {
-      const file = fileInput.files && fileInput.files[0];
-      // Resetting the value is what makes picking the SAME file twice fire
-      // change a second time. Without it the second attempt looks like a dead
-      // control.
-      fileInput.value = '';
-      if (!file) return;
-      setProblem('');
-      try {
-        const photo = await photoFromFile(file);
+    // The picker is app/photopicker.js, mounted into the frame. `hidden` is
+    // `display: none` and .app-frame is a three-row grid, so a display:none
+    // child is not a grid item at all and this cannot open a fourth row.
+    const picker = photoPicker(root, {
+      signal: ctx.signal,
+      onError: fail,
+      onPhoto: (photo) => {
+        setProblem('');
         setSubject({
           kind: 'mine',
           photo,
@@ -600,15 +560,8 @@ export default register(defineScreen({
         // was a style row in the viewer, which would make styleId a two-owner
         // field and the ownership table wrong.
         ctx.navigate('capture', { import: '1' });
-      } catch (err) {
-        // HEIC is the case worth naming: iOS shoots it by default, and Chrome
-        // and Firefox cannot decode it, so createImageBitmap rejects on a file
-        // the system picker was happy to offer. Safari can, which makes this a
-        // browser problem rather than a phone problem.
-        console.error('paste: could not read the picked image', err);
-        fail('That image could not be read. HEIC photos only work in Safari — try a JPEG or PNG.');
-      }
-    }, { signal: ctx.signal });
+      },
+    });
 
     // --- action bar ------------------------------------------------------
     //
@@ -662,7 +615,7 @@ export default register(defineScreen({
         label: 'ALBUM',
         aria: 'Use a photo you already have',
         flex: 30,
-        onTap: () => fileInput.click(),
+        onTap: () => picker.open(),
       },
       {
         label: 'PASTE',

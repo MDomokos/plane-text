@@ -46,7 +46,35 @@
   background: var(--pt-bg);
   border-top: 1px solid var(--pt-line-strong);
   padding: var(--pt-space-4) 0 var(--pt-space-4);
+  animation: pt-sheet-in var(--pt-dur-base) var(--pt-ease);
 }
+
+/* THE PANEL AND THE DIM ARRIVE TOGETHER. Added 2026-08-09.
+ *
+ * The `.is-dimmed` rule above has transitioned `filter` over --pt-dur-base
+ * since it was written, and the panel had no entrance at all: the frame faded
+ * down over 200ms while the sheet teleported into place on frame one. Two
+ * halves of one gesture, one of them animated. The sheet arriving first also
+ * meant it appeared over an undimmed picture, which is the exact
+ * full-brightness-behind-a-modal problem the `.is-dimmed` selector fix was
+ * about, briefly, every time.
+ *
+ * translateY and nothing else. No fade: this app has no elevation and a panel
+ * that fades in is a panel that was floating somewhere. It slides up from the
+ * edge it is attached to, which is what `bottom: 0` already says about it.
+ *
+ * The exit is in artefact.js, because close() has to remove the element and CSS
+ * cannot hold a node alive to animate it out. */
+@keyframes pt-sheet-in { from { transform: translateY(100%); } }
+
+/* The exit. Same distance, same duration, same curve, and it lives here rather
+ * than as an el.animate() in artefact.js so the two halves of the gesture are
+ * one thing to read and change. `forwards` holds the panel off-screen for the
+ * frames between animationend and the remove(). */
+.sc-sheet.is-closing {
+  animation: pt-sheet-out var(--pt-dur-base) var(--pt-ease) forwards;
+}
+@keyframes pt-sheet-out { to { transform: translateY(100%); } }
 
 .sc-sheet-head {
   margin: 0 0 var(--pt-space-3);

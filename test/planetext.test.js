@@ -2364,7 +2364,20 @@ test('the gallery opens on the latest message, and the big paste target is the e
   // the regression that would give an imported photo no moment at which style
   // can be chosen -- see the header of capture.js.
   assert.match(code, /navigate\('capture', \{ import: '1' \}\)/, 'the picker must still route through capture');
-  assert.match(code, /fileInput\.click\(\)/, 'the library door must still open the system picker');
+  // The picker itself is app/photopicker.js as of 2026-08-09, so this stopped
+  // being `fileInput.click()` in this file. It moved because capture needed the
+  // same door for the button in its camera-denied notice -- spec 8 has promised
+  // that escape hatch since before the gallery existed -- and two copies of the
+  // File -> RGBA decode would have differed on the two createImageBitmap options
+  // that matter, which are invisible until a specific phone hands over a
+  // sideways or gigantic photograph.
+  assert.match(code, /picker\.open\(\)/, 'the library door must still open the system picker');
+  assert.match(code, /from '\.\.\/photopicker\.js'/, 'and it must be the shared one');
+  for (const screen of ['app/screens/capture.js', 'app/screens/paste.js']) {
+    const js = readFileSync(new URL(`../${screen}`, import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    assert.ok(!/createImageBitmap/.test(js), `${screen} must not decode a picked file itself`);
+  }
 
   // Everything the screen did before it was a gallery. Each of these is a path
   // with no other test: a clipboard read that needs a gesture, a textarea for
@@ -2372,7 +2385,12 @@ test('the gallery opens on the latest message, and the big paste target is the e
   // the share-target inbox.
   assert.match(code, /navigator\.clipboard\.readText\(\)/);
   assert.match(code, /setMode\('field'\)/, 'the clipboard failure must still reveal the textarea');
-  assert.match(code, /const MAX_SOURCE_PX = 1600/);
+  // The 1600px source cap moved into app/photopicker.js with the decode it
+  // guards. It is asserted at its new address rather than dropped, because it is
+  // the line between a 12 MP photo costing 96 MB of Float64Array and costing
+  // nothing -- and it is invisible until the phone that produces one appears.
+  assert.match(readFileSync(new URL('../app/photopicker.js', import.meta.url), 'utf8'),
+    /const MAX_SOURCE_PX = 1600/, 'the source cap must survive the move');
   assert.match(code, /takeSharedText\(\)/);
 
   // DEFAULT_ROUTE is not this. "Opens the latest image by default" is about the

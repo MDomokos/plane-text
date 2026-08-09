@@ -113,9 +113,11 @@
 .pt-slot-hero.is-firing .pt-hero-label { transform: scaleX(0.8); }
 
 /* There is no reduced version of the clamp. actionbar.js resolves fire()
- * immediately instead, and the screen change does the confirming. */
-@media (prefers-reduced-motion: reduce) {
-  .pt-slot,
-  .pt-hero-label,
-  .pt-bracket { transition: none; }
-}
+ * immediately instead, and the screen change does the confirming.
+ *
+ * The @media block that used to be here -- three selectors set to
+ * `transition: none` -- is gone as of 2026-08-09. shell.css carries one guard
+ * for the whole app, and a per-file copy is worse than redundant: it covers the
+ * three selectors that existed the day it was written, so every rule added to
+ * this file afterwards was silently outside it. .pt-slot-hero's background was
+ * already outside it. */

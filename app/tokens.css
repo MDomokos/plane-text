@@ -357,7 +357,32 @@
   --pt-focus: 2px solid var(--pt-accent);
 
   /* Motion. Two durations. The shutter uses the fast one, and that animation
-   * is the whole capture feedback, since there is no flash. */
+   * is the whole capture feedback, since there is no flash.
+   *
+   * TWO, AND IT STAYS TWO. A third duration is the commonest way a motion
+   * system stops being one: the moment there is a "slow" the argument for any
+   * given value becomes taste rather than a rule, and nothing in this app is
+   * slower than the screen change. Anything that seems to want more time wants
+   * a different curve, which is what the tokens below are for.
+   *
+   * AND TWO CURVES, ADDED 2026-08-09. Every transition in the app said `ease`,
+   * which is not a decision -- it is the CSS initial value, and it is the one
+   * curve that is wrong for both jobs here. `ease` is symmetric-ish and slow
+   * off the mark, so a control's press feels late and an entrance feels like
+   * it is being placed rather than arriving.
+   *
+   *   --pt-ease     things ENTERING or MOVING. Fast out of the gate, long
+   *                 settle, no overshoot. Overshoot is elevation's language and
+   *                 there is no elevation here.
+   *   --pt-ease-io  a control changing STATE in place: colour, hairline
+   *                 strength, the hero's clamp. Symmetric, because the state it
+   *                 is leaving is as real as the one it is entering.
+   *
+   * The distinction is the same one --pt-dur-fast and --pt-dur-base already
+   * make, on the other axis, so the four values are a 2x2 rather than a list. */
   --pt-dur-fast: 110ms;
   --pt-dur-base: 200ms;
+
+  --pt-ease: cubic-bezier(0.2, 0, 0, 1);
+  --pt-ease-io: cubic-bezier(0.4, 0, 0.2, 1);
 }

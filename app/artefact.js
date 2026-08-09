@@ -237,11 +237,68 @@ export function artefact({ root, bottomBar, stage, say, current, signal } = {}) 
     cancel.addEventListener('click', close, { signal });
     scrim.append(cancel);
 
+    // Closing, and the order matters.
+    //
+    // The dim lifts NOW and the panel leaves over the same --pt-dur-base the
+    // `.is-dimmed` filter transition takes, so the picture coming back up and
+    // the sheet going down are one move rather than two. The entrance is a
+    // keyframe in artefact.css; the exit has to be here, because CSS cannot
+    // hold a node alive long enough to animate it out.
+    //
+    // Made inert on the first frame rather than when the animation ends. A
+    // 200ms window in which a sliding button still takes taps is a window in
+    // which SAVE fires from a sheet the user has already cancelled, and it is
+    // the same class of bug as the action bar staying live behind the dim.
+    //
+    // A CLASS AND animationend, NOT el.animate. The duration and the curve stay
+    // in artefact.css next to the entrance they mirror, and this file does not
+    // learn a number that tokens.css owns -- which is the drift the whole
+    // stylesheet-per-component argument at the top of that file is about.
+    //
+    // It also gets reduced motion for free and correctly: shell.css's guard
+    // clamps the animation to 1ms, so animationend fires on the next frame and
+    // the sheet is simply gone. That is why the guard is 1ms and not `none`;
+    // `none` would mean no animationend, and this handler would never run.
+    //
+    // The timeout is for exactly that case arriving from somewhere else -- an
+    // engine that does not fire the event, an extension that kills animations.
+    // A sheet that fails to close is a screen the user cannot get out of, so it
+    // gets a floor rather than a promise.
+    let closing = false;
     function close() {
-      scrim.remove();
+      if (closing) return;   // cancel then abort would remove() twice
+      closing = true;
       root.classList.remove('is-dimmed');
       bottomBar.style.filter = '';
       bottomBar.style.pointerEvents = '';
+      scrim.style.pointerEvents = 'none';
+      scrim.classList.add('is-closing');
+      const gone = () => scrim.remove();
+
+      // IS ANYTHING ACTUALLY ANIMATING? Ask, rather than assume.
+      //
+      // getAnimations() forces the style recalc the class just invalidated and
+      // reports what is running, so this is the real answer for this element in
+      // this engine on this frame -- not a guess from a media query. Nothing
+      // running means the removal is synchronous, which is what the sheet did
+      // before this change and what every caller has always been able to rely
+      // on.
+      //
+      // Three things land in that branch and all three want it: an engine with
+      // no CSS animation support, the headless DOM the smoke test mounts every
+      // screen in, and a user agent that has stripped animations outright.
+      // Reduced motion does NOT land here -- shell.css clamps to 1ms rather
+      // than `none` precisely so there is still an animation to end.
+      const running = typeof scrim.getAnimations === 'function'
+        && scrim.getAnimations().length > 0;
+      if (!running) { gone(); return; }
+
+      scrim.addEventListener('animationend', gone, { once: true });
+      // The floor. A sheet that fails to close is a screen with no way out, so
+      // it does not depend on an event arriving. Comfortably past
+      // --pt-dur-base; it is a deadline, not a duration, which is why it is not
+      // a token. Same reasoning as the router's bail.
+      setTimeout(gone, 400);
     }
     signal?.addEventListener('abort', close, { once: true });
 

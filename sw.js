@@ -16,7 +16,7 @@
 
 /* eslint-env serviceworker */
 
-// @build pt-19b3facd5e91
+// @build pt-7a02b9e01dd9
 
 importScripts('app/precache-manifest.classic.js');
 

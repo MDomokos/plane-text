@@ -86,12 +86,15 @@ import { styleList } from '../../src/styles.js';
 import { actionBar } from '../actionbar.js';
 import { autoFit, publishArtWidth, stageArtWidth } from '../art.js';
 import { currentWord, advanceWord } from '../words.js';
-import { openCamera, openStill, CameraError } from '../camera.js';
+import { openCamera, openStill, CameraError, cameraOpenedBefore, cameraPermissionGranted } from '../camera.js';
+import { photoPicker } from '../photopicker.js';
+import { DEFAULT_RAMP } from '../../src/constants.js';
 import { startViewfinder } from '../viewfinder.js';
 import { clearAtlasCache } from '../atlas.js';
 import { setSubject, getSubject, clearSubject, clipboardMayHavePayload } from '../pipeline.js';
 import { attachStyleGesture, cycleStyle } from '../stylegesture.js';
 import { sizeSlider } from '../sizeslider.js';
+import { reduced, flash } from '../motion.js';
 
 // Per-visit resources that unmount() has to reach.
 //
@@ -225,6 +228,37 @@ export default register(defineScreen({
     notice.hidden = true;
     stage.append(notice);
 
+    // THE WARM-UP. Added 2026-08-09, on the owner's report that switching back
+    // from the gallery leaves the screen blank until the camera has an input.
+    //
+    // getUserMedia takes a few hundred milliseconds on a warm permission and
+    // longer after a flip, and startSource() replaces the canvas before it
+    // awaits, so for that whole window the stage holds a blank element. It reads
+    // as a viewfinder that is missing rather than one that is starting.
+    //
+    // A <pre>, NOT THE CANVAS, and this is the constraint that shapes the whole
+    // feature. The canvas is about to be handed to startViewfinder(), which
+    // takes a WebGL context on it -- and an element that has held a 2D context
+    // can never hold a WebGL one. Painting a placeholder into it is the flip
+    // hang written out at the top of startSource(), reintroduced deliberately.
+    // So the placeholder is a sibling, and it is a <pre> of glyphs, which is
+    // what this app renders anyway.
+    //
+    // Overlaid rather than swapped in. The notice hides the canvas because there
+    // is not going to be a picture; here there is, in a moment, and
+    // startViewfinder() has to measure a canvas that has a box. See .sc-warmup
+    // in capture.css for the one position:absolute on this screen and why it is
+    // contained to the stage.
+    const warmup = document.createElement('pre');
+    warmup.className = 'sc-warmup';
+    warmup.hidden = true;
+    // Decoration. It is noise standing in for a picture that has not arrived,
+    // and a screen reader reading out four thousand ramp glyphs is the worst
+    // possible outcome of trying to be helpful here.
+    warmup.setAttribute('aria-hidden', 'true');
+    stage.append(warmup);
+
+
     // --- bottom band -----------------------------------------------------
     const bottom = document.createElement('div');
     bottom.className = 'app-chrome-bot sc-bottom';
@@ -285,6 +319,34 @@ export default register(defineScreen({
 
     root.append(top, stage, bottom);
 
+    // The library picker, for the button in the camera-denied notice. It is
+    // app/photopicker.js, the same module the gallery's ALBUM slot uses, so the
+    // EXIF rotation and the 1600px downscale have one implementation.
+    //
+    // Mounted into the frame, which is a three-row grid: the input is `hidden`,
+    // that is `display: none`, and a display:none child is not a grid item at
+    // all, so it cannot open a fourth row.
+    //
+    // A picked photo goes the same way one picked on the gallery goes -- back
+    // through this screen with `?import=1`, which is a real navigation and a
+    // fresh mount in the frozen sub-mode. Spec 5.1 justifies the composer having
+    // no style picker with "style was chosen at capture", and that is only true
+    // if an imported photo gets a capture moment.
+    const picker = photoPicker(root, {
+      signal: ctx.signal,
+      onError: (message) => say(message, 'error'),
+      onPhoto: (photo) => {
+        setSubject({
+          kind: 'mine',
+          photo,
+          word: currentWord(),
+          takenAt: Date.now(),
+          source: 'library',
+        });
+        ctx.navigate('capture', { import: '1' });
+      },
+    });
+
     // --- state ----------------------------------------------------------
     let word = currentWord();
     let camera = null;
@@ -298,14 +360,84 @@ export default register(defineScreen({
     const showPerf = ctx.route.params.perf === '1';
 
     let statusTimer = 0;
+    // flash() is a 110ms fade over the line whose text has just changed. See
+    // motion.js for why the existing `color` transition on .app-status was
+    // animating the wrong event without it. It is called on the clear too,
+    // because "FRONT CAMERA" vanishing is as much a change as it arriving.
     function say(text, kind = '') {
       status.textContent = text;
       status.classList.toggle('is-warn', kind === 'warn');
       status.classList.toggle('is-error', kind === 'error');
+      flash(status);
       clearTimeout(statusTimer);
-      if (text) statusTimer = setTimeout(() => { status.textContent = ''; }, 2600);
+      if (text) statusTimer = setTimeout(() => { status.textContent = ''; flash(status); }, 2600);
     }
     ctx.signal.addEventListener('abort', () => clearTimeout(statusTimer), { once: true });
+
+    // --- the warm-up ------------------------------------------------------
+    //
+    // A field of ramp glyphs, weighted dark, reshuffling about eight times a
+    // second. Three decisions in that sentence:
+    //
+    //   THE CURRENT STYLE'S RAMP, so what you see while it opens is made of the
+    //   same glyphs as what arrives. Halftone carries `ramp: null` -- it is a
+    //   cell codec, not a ramp one -- so it falls back to the default rather
+    //   than drawing blanks.
+    //
+    //   WEIGHTED DARK, via the square. A uniform pick over the ramp averages to
+    //   mid-grey and reads as a picture of something. Squaring pushes it toward
+    //   the sparse end, which reads as an absence of signal, which is what it
+    //   is.
+    //
+    //   MOVING. A still field of static for 800ms looks like a stalled feed,
+    //   which is the thing this exists to prevent. Under prefers-reduced-motion
+    //   it is painted once and left, because a placeholder is not worth a
+    //   vestibular cost.
+    const WARM_MS = 120;
+    let warmTimer = 0;
+
+    function paintWarmup() {
+      const r = stage.getBoundingClientRect();
+      if (!(r.width > 0 && r.height > 0)) return;
+      const ramp = currentStyle(state.get()).ramp || DEFAULT_RAMP;
+      const glyphs = [...ramp];
+      // ~64 columns across the stage at the ramp advance, which puts the cell
+      // size in the same range the viewfinder will use. Nothing downstream reads
+      // these numbers, so they are a look rather than a measurement.
+      const cols = 64;
+      const size = Math.max(4, r.width / (cols * 0.6));
+      const rows = Math.max(1, Math.floor(r.height / size));
+      warmup.style.fontSize = `${size}px`;
+      let out = '';
+      for (let y = 0; y < rows; y += 1) {
+        for (let x = 0; x < cols; x += 1) {
+          const t = Math.random() * Math.random();
+          out += glyphs[Math.min(glyphs.length - 1, Math.floor(t * glyphs.length))];
+        }
+        if (y < rows - 1) out += '\n';
+      }
+      warmup.textContent = out;
+    }
+
+    function showWarmup() {
+      if (!warmup.hidden) return;
+      warmup.hidden = false;
+      paintWarmup();
+      if (reduced()) return;
+      clearInterval(warmTimer);
+      warmTimer = setInterval(paintWarmup, WARM_MS);
+    }
+
+    function hideWarmup() {
+      clearInterval(warmTimer);
+      warmTimer = 0;
+      if (warmup.hidden) return;
+      warmup.hidden = true;
+      // Dropped rather than left in the DOM. It is a few thousand characters and
+      // it is never read again; the next show repaints from scratch anyway.
+      warmup.textContent = '';
+    }
+    ctx.signal.addEventListener('abort', hideWarmup, { once: true });
 
     // `onRetry` is the difference between a notice and a dead end. Passing it
     // adds a button whose click handler runs inside a real user gesture, which
@@ -313,6 +445,7 @@ export default register(defineScreen({
     // definition cannot provide. Omitted for the failures where retrying is a
     // lie: see the call site.
     function showNotice(title, body, onRetry = null) {
+      hideWarmup();
       canvas.hidden = true;
       notice.hidden = false;
       notice.textContent = '';
@@ -323,6 +456,30 @@ export default register(defineScreen({
       p.className = 'sc-notice-body';
       p.textContent = body;
       notice.append(h, p);
+
+      // THE LIBRARY, AS A BUTTON. Added 2026-08-09, on the owner's report: "if
+      // camera permission is denied, show the album image picker button."
+      //
+      // Spec 8 has promised this escape hatch since before the gallery existed,
+      // and what was here instead was a sentence -- "Open a photo from your
+      // library instead, the button below on the left" -- pointing at the OPEN
+      // slot. OPEN does not open a photo. It goes to the gallery, where ALBUM is
+      // the picker. So the one instruction on the screen you reach by declining
+      // the camera described a control that does something else, and the way
+      // through cost two taps and a guess.
+      //
+      // FIRST, ABOVE ENABLE CAMERA, and that is the ranking rather than the
+      // reading order. This is the action that always works. Re-requesting the
+      // camera often cannot: Chrome will not re-prompt after a denial until the
+      // user changes it in site settings, so ENABLE CAMERA is the button that
+      // may quietly do nothing, and it is second.
+      const lib = document.createElement('button');
+      lib.type = 'button';
+      lib.className = 'sc-notice-retry is-primary';
+      lib.textContent = 'USE A PHOTO';
+      lib.setAttribute('aria-label', 'Use a photo you already have');
+      lib.addEventListener('click', () => picker.open(), { signal: ctx.signal });
+      notice.append(lib);
 
       if (!onRetry) return;
       const b = document.createElement('button');
@@ -692,6 +849,29 @@ export default register(defineScreen({
       canvas.replaceWith(fresh);
       canvas = fresh;
 
+      // THE PLACEHOLDER, BEFORE THE AWAIT THAT COSTS THE TIME. See camera.js
+      // for how the two signals are decided; what is here is when to ask.
+      //
+      // The synchronous one first, so the placeholder is up in the same task the
+      // canvas was replaced in and there is never a blank frame. The async one
+      // is a second chance for a granted permission this app has no memory of --
+      // cleared storage, a private window -- and it is guarded on the state at
+      // the time it resolves, because by then the camera may have arrived, the
+      // notice may be up, or the screen may be gone.
+      //
+      // Not for an import. openStill() is synchronous and there is nothing to
+      // wait for, and a photo you just chose is not a camera warming up.
+      if (!importing) {
+        if (cameraOpenedBefore()) showWarmup();
+        else {
+          cameraPermissionGranted().then((granted) => {
+            if (!granted || ctx.signal.aborted) return;
+            if (vf || cameraError || !notice.hidden) return;
+            showWarmup();
+          });
+        }
+      }
+
       if (importing) {
         try {
           camera = openStill(pending.photo);
@@ -728,9 +908,12 @@ export default register(defineScreen({
         // button, because it costs a tap to learn the same thing the sentence
         // above it already said.
         const retryable = cameraError.code !== 'none' && cameraError.code !== 'unsupported';
+        // NEITHER SENTENCE NAMES A BUTTON ANY MORE. Both used to end "the
+        // button below on the left", which is the OPEN slot, which goes to the
+        // gallery rather than to a picker. The notice carries a real one now.
         const body = cameraError.code === 'denied'
-          ? 'Open a photo from your library instead — the button below on the left.'
-          : 'You can still open a photo from your library — the button below on the left.';
+          ? 'You can use a photo you already have instead.'
+          : 'You can still use a photo you already have.';
         showNotice(cameraError.message, body, retryable ? startSource : null);
         render(null);
         return;
@@ -744,7 +927,15 @@ export default register(defineScreen({
         stage,
         store: state,
         signal: ctx.signal,
-        onStats: (stats) => render(stats),
+        onStats: (stats) => {
+          // The first frame is what the placeholder was covering, so this is
+          // where it comes down -- not at startViewfinder(), which returns
+          // before the loop has painted anything. `camera.live` is false while
+          // the track still reports 0x0, which openCamera() explicitly allows
+          // itself to hand back after a flip.
+          if (camera && camera.live) hideWarmup();
+          render(stats);
+        },
       });
 
       // startViewfinder is allowed to swap its own surface during construction

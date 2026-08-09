@@ -175,6 +175,61 @@ function makeCanvas(w, h) {
   return c;
 }
 
+// ---------------------------------------------------------------------------
+// IS A CAMERA GOING TO ARRIVE? Added 2026-08-09, on the owner's report: "when
+// switching back to viewfinder mode from the gallery screen, the main screen is
+// blank until the camera actually has an input."
+//
+// getUserMedia takes a few hundred milliseconds on a warm permission and longer
+// after a flip, and for that whole time the capture screen holds a fresh blank
+// canvas. It looks like the viewfinder is missing rather than starting. The fix
+// is a placeholder, and the only question a placeholder has to answer is this
+// one: is showing a viewfinder-like thing going to turn out to have been a lie.
+//
+// TWO SIGNALS, AND THE SYNCHRONOUS ONE IS THE IMPORTANT ONE.
+//
+// A permission query is a promise, and a placeholder that appears 30ms into a
+// 300ms wait has covered nine tenths of nothing. So the primary signal is a flag
+// this app sets itself the first time a camera opens: it is a fact we own, it
+// reads synchronously, and it is true on every engine. The Permissions API is
+// the second chance, for the case where the flag is missing but permission is
+// genuinely granted -- cleared storage, or a private window.
+//
+// WHY NOT SHOW IT ALWAYS. On first run the browser's own permission dialog is
+// up, and the screen behind it must not already be showing something that looks
+// like a working camera: that is a claim about a decision the user has not made
+// yet, and it stays up if they decline. Nothing has been granted, so nothing is
+// promised.
+const OPENED_KEY = 'planetext.camera.opened.v1';
+
+// Set on the first successful open, and never cleared. It is a claim about the
+// past -- a camera opened here once -- not about the present, so a user who
+// later revokes permission in browser settings gets a placeholder for as long as
+// getUserMedia takes to reject, and then the notice. That is the right failure:
+// under a second of an honest guess, replaced by the truth.
+function rememberOpened() {
+  try { localStorage.setItem(OPENED_KEY, '1'); } catch { /* private mode; the guess is just weaker */ }
+}
+
+export function cameraOpenedBefore() {
+  try { return localStorage.getItem(OPENED_KEY) === '1'; } catch { return false; }
+}
+
+// The second chance. Resolves false on any engine that does not implement the
+// `camera` permission name -- Safari rejects, Firefox rejects -- which is the
+// same shape as the clipboard check in pipeline.js and correct for the same
+// reason: the placeholder is an enhancement, so a platform that cannot answer
+// the question loses only the enhancement.
+export async function cameraPermissionGranted() {
+  try {
+    if (!navigator.permissions || !navigator.permissions.query) return false;
+    const status = await navigator.permissions.query({ name: 'camera' });
+    return status.state === 'granted';
+  } catch {
+    return false;
+  }
+}
+
 export async function openCamera({ facingMode = 'environment', host = null } = {}) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     throw new CameraError('unsupported', 'This browser cannot open a camera.');
@@ -228,6 +283,12 @@ export async function openCamera({ facingMode = 'environment', host = null } = {
   // viewfinder's loop keeps ticking and paints the moment frames start. See the
   // null-frame note in viewfinder.js tick().
   await waitForFrame(video);
+
+  // A camera has opened on this device, which is what the next visit's
+  // placeholder decision is made from. Here rather than at the call site: this
+  // is the line past which the open cannot fail, and a screen that forgot to
+  // record it would leave the flag describing the wrong thing.
+  rememberOpened();
 
   // ---------------------------------------------------------------------------
   // MIRRORING THE FRONT CAMERA: THE PREVIEW ONLY. 2026-08-09, SECOND PASS.

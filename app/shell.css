@@ -542,3 +542,92 @@ body[data-route^="settings/"] .app-bottom:not(:empty) {
 /* Focus, once, for everything ---------------------------------------------- */
 
 :focus-visible { outline: var(--pt-focus); outline-offset: 2px; }
+
+/* Navigation -------------------------------------------------------------- */
+
+/* THE PICTURE IS THE SAME OBJECT ACROSS A NAVIGATION, SAID AS MOTION.
+ * Added 2026-08-09. The mechanism is in router.js; these two names are what
+ * make it mean anything.
+ *
+ * --pt-chrome-top / --pt-chrome-bot already guarantee the stage lands in the
+ * identical box on capture, compose and paste, and tokens.css spends sixty
+ * lines on why. But the router replaces the container's children, so what the
+ * user saw was the picture being destroyed and an identical picture being
+ * built: a one-frame cut in the middle of the screen, at the exact moment the
+ * invariant is supposed to be visible. The layout was right and the transition
+ * contradicted it.
+ *
+ * A named element is MORPHED between the two states rather than crossfaded, so
+ * the browser animates the old stage box into the new one. They are the same
+ * box, so the animation is a no-op and the picture is provably continuous --
+ * the invariant enforced by the compositor rather than by two screens agreeing
+ * about a token. Everything not named here falls into the `root` snapshot and
+ * crossfades, which is the chrome, and the chrome is the part that genuinely
+ * changed.
+ *
+ * The action bar is named for the same reason and it is the bigger visible win:
+ * main.js empties #app-bottom on every navigation and each screen builds a new
+ * .pt-actionbar into it, so three hairline boxes were being thrown away and
+ * three identical ones drawn. Named, they persist and only the labels cross
+ * through, so the bar reads as one instrument changing mode instead of five
+ * different bars.
+ *
+ * A view-transition-name must be unique per document while a transition runs.
+ * Both of these are safe by construction: the old screen's element is gone
+ * before the new one exists, since the router's update callback clears the
+ * container before it mounts. Do not put one of these names on a second
+ * element, and do not name .app-art -- it is inside the stage and would be
+ * lifted out of it into its own snapshot layer. */
+.app-stage    { view-transition-name: pt-stage; }
+.pt-actionbar { view-transition-name: pt-bar; }
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--pt-dur-base);
+  animation-timing-function: var(--pt-ease);
+}
+
+/* The morph pair. The boxes are identical so there is nothing to animate, and
+ * saying so explicitly is cheaper than letting the engine tween a no-op and
+ * crossfade the contents of the stage on top of it. */
+::view-transition-group(pt-stage) { animation-duration: 0ms; }
+::view-transition-old(pt-stage),
+::view-transition-new(pt-stage) { animation: none; mix-blend-mode: normal; }
+
+::view-transition-group(pt-bar) {
+  animation-duration: var(--pt-dur-base);
+  animation-timing-function: var(--pt-ease);
+}
+
+/* Reduced motion, once, for everything ------------------------------------- */
+
+/* One guard. It replaced three: actionbar.css turned off three selectors,
+ * capture.css had its own, and each new animation was adding a fourth.
+ *
+ * 1ms rather than `none`, because `animation: none` cancels an animation
+ * mid-flight and an element mid-keyframe reverts to its unanimated state --
+ * which for anything animating IN is invisible. 1ms lands it, so reduced motion
+ * loses the movement and not the information. `forwards` fills still apply.
+ *
+ * The ::view-transition pseudos are a separate rule and genuinely need
+ * `none`: they are not the app's elements, they are snapshots, and a 1ms
+ * crossfade of two full-screen images is a flash. router.js also skips the
+ * transition outright under this setting, so this is the belt to that braces --
+ * kept because the media query can flip while a transition is in flight.
+ *
+ * WHAT THIS DOES NOT REACH: el.animate(). The Web Animations API takes a
+ * number and no media query applies to it. Those call sites check
+ * motion.js's reduced() instead, and that is the whole reason that function
+ * exists. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation: none !important; }
+}

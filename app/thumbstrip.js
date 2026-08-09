@@ -209,6 +209,13 @@ export function thumbStrip(host, {
     del.dataset.armed = '1';
     del.textContent = 'TAP AGAIN';
     del.setAttribute('aria-label', `Confirm deleting ${name}`);
+    // The draining hairline in thumbstrip.css reads this. Published from
+    // ARM_MS rather than written twice, because a countdown that ends at a
+    // different moment from the timer it counts is a lie about the one thing
+    // it is for. Set on every arm, not once at build: the value is cheap and
+    // an element re-armed after a disarm restarts the CSS animation from the
+    // attribute change either way.
+    del.style.setProperty('--pt-arm-ms', `${ARM_MS}ms`);
     clearTimeout(armTimer);
     armTimer = setTimeout(disarm, ARM_MS);
   }

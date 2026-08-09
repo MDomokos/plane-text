@@ -195,6 +195,36 @@ async function mount(id, params = {}) {
   ok(/clipboard/.test(openSlot.getAttribute('aria-label') || ''),
      'capture: and the accessible name says so, since the dot is aria-hidden');
   ok(container.querySelector('.sc-notice') && !container.querySelector('.sc-notice').hidden, 'capture: no-camera notice shown');
+
+  // THE WAY PAST A CAMERA YOU CANNOT HAVE. Added 2026-08-09, on the owner's
+  // report: "if camera permission is denied, show the album image picker
+  // button."
+  //
+  // Spec 8 has promised this escape hatch since before the gallery existed, and
+  // what was on screen instead was a sentence -- "the button below on the left"
+  // -- naming the OPEN slot, which goes to the gallery rather than to a picker.
+  // The one instruction on the screen you reach by declining the camera
+  // described a control that does something else.
+  //
+  // First, above ENABLE CAMERA, because it is the action that always works:
+  // Chrome will not re-prompt after a denial until the user changes it in site
+  // settings, so the retry is the button that may quietly do nothing.
+  const noticeBtns = [...container.querySelectorAll('.sc-notice-retry')];
+  ok(noticeBtns.length >= 1 && noticeBtns[0].classList.contains('is-primary'),
+     'capture: the library button leads the notice');
+  ok(noticeBtns[0] && noticeBtns[0].textContent === 'USE A PHOTO', 'capture: and it says what it does');
+  ok(container.querySelector('input[type="file"]'), 'capture: with a real picker behind it');
+  ok(!/button below on the left/.test(container.querySelector('.sc-notice-body').textContent),
+     'capture: and the copy no longer points at a slot that does something else');
+
+  // The warm-up placeholder. It is a <pre> SIBLING of the canvas, never the
+  // canvas itself: startViewfinder() takes a WebGL context on that element, and
+  // an element that has held a 2D context can never hold a WebGL one. Painting
+  // a placeholder into it is the flip hang reintroduced on purpose.
+  const warm = container.querySelector('.sc-warmup');
+  ok(warm && warm.tagName === 'PRE', 'capture: the warm-up is a pre, not the canvas');
+  ok(warm && warm.parentElement.classList.contains('app-stage'), 'capture: and a sibling of the canvas');
+  ok(warm && warm.hidden, 'capture: down once the notice is up, since no camera is coming');
   // band order must be chrome / stage / chrome, or the grid rows do not line up
   const kids = [...root.children].map((e) => e.className.split(' ')[0]);
   ok(kids[0].startsWith('app-chrome-top') && kids[1] === 'app-stage' && kids[2].startsWith('app-chrome-bot'),

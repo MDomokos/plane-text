@@ -244,16 +244,25 @@ export default register(defineScreen({
     recBox.append(recBlurb);
 
     // Two taps, the second on a different word. There is no undo.
+    //
+    // ARM_MS is thumbstrip.js's name for this same 3000, and the two are still
+    // separate numbers. That was argued out when the strip's delete was built
+    // -- "two disarm timings for one idiom would be two idioms" -- and it is
+    // recorded here as well now that both controls DRAW the window, because a
+    // drift between them is visible from 2026-08-09 onward rather than only
+    // being felt.
+    const ARM_MS = 3000;
     let arming = 0;
     clearBtn.addEventListener('click', () => {
       if (clearBtn.dataset.armed !== '1') {
         clearBtn.dataset.armed = '1';
         clearBtn.textContent = 'TAP AGAIN TO CLEAR';
+        clearBtn.style.setProperty('--pt-arm-ms', `${ARM_MS}ms`);
         clearTimeout(arming);
         arming = setTimeout(() => {
           clearBtn.dataset.armed = '';
           clearBtn.textContent = 'CLEAR ALL';
-        }, 3000);
+        }, ARM_MS);
         return;
       }
       clearTimeout(arming);
