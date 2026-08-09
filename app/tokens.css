@@ -84,11 +84,12 @@
   --pt-font: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, monospace;
   --pt-mono: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, monospace;
 
-  /* 10: the thumbnail name, and nothing else. Added 2026-08-09 because
-   * paste.css had `font-size: 10px` as a literal, the only off-scale size in
-   * the app. It is deliberate rather than a mistake, since a 46px thumbnail
-   * cannot carry 12px type, so it becomes a token instead of being rounded up
-   * into one that does not fit. */
+  /* 10: the thumbnail name and the strip's cap note, and nothing else. Added
+   * 2026-08-09 because paste.css had `font-size: 10px` as a literal, the only
+   * off-scale size in the app. It is deliberate rather than a mistake, since a
+   * thumbnail this size cannot carry 12px type, so it becomes a token instead
+   * of being rounded up into one that does not fit. The argument got stronger
+   * when the shared size took that strip from 46px down to 36. */
   --pt-size-2xs: 0.625rem;
   --pt-size-xs: 0.75rem;   /* 12: captions, secondary readouts */
   --pt-size-sm: 0.875rem;  /* 14: body small, labels */
@@ -267,9 +268,49 @@
    * 48 makes the strip 52 and the band 173, three pixels inside the budget.
    * The viewer's thumbnails get bigger, which is the screen where the mis-tap
    * was reported; the open screen's get smaller, which is the screen with room
-   * to spare and no band to overflow. */
+   * to spare and no band to overflow.
+   *
+   * STILL 36 x 48 AFTER THE NAME PLATE. 2026-08-09, second pass.
+   *
+   * The two strips became one component (app/thumbstrip.js) and the shared
+   * thumbnail carries a name on both screens, which the viewer's did not. A
+   * caption BELOW the card costs 15px and the band has 4 spare, so the card
+   * would have had to come down to 36 tall and, at 3:4, to 27 wide -- smaller
+   * than either strip has ever drawn.
+   *
+   * That sentence used to end "and narrow enough to re-open the delete control's
+   * hit-box bug", which was the stronger half of the argument and is no longer
+   * true of anything: the corner delete button was replaced on 2026-08-09 by one
+   * labelled control in the chrome band, so nothing is hung off this card any
+   * more and its width no longer decides a hit box. The remaining reason still
+   * holds on its own.
+   *
+   * So the card keeps this box and the name plate is drawn INSIDE it: 35px of
+   * art, a 1px divider, a 12px name. The art the user sees is the same size
+   * either way, because a 3:4 grid draws 26x35 in the first box and 27x36 in
+   * the second. What the outer 36 x 48 buys is the tap target. The budget is
+   * written out in full at the top of app/thumbstrip.css. */
   --pt-thumb-w: 36px;
   --pt-thumb-h: 48px;
+
+  /* The status line's reserved height. Added 2026-08-09 with the shared strip.
+   *
+   * .app-status carried 18px as a literal in shell.css, and it became a token
+   * because a second screen had to reserve exactly the same amount of room
+   * WITHOUT a status line: the viewer's strip ends 22px above the action bar,
+   * which is this plus the band's 4px gap, and the open screen -- a scrolling
+   * form at the time -- had to land in the same place or the strip was not in
+   * one place.
+   *
+   * --pt-strip-gutter was that reservation, `calc(var(--pt-status-h) +
+   * var(--pt-space-1))`, written as a sum so the two could not drift. It is gone
+   * as of the gallery rewrite, along with its one consumer. The open screen now
+   * builds .app-frame and has a real .app-chrome-bot with a real .app-status in
+   * it, so both strips reach the same place by the same mechanism -- the
+   * component's own `margin-top: auto` inside an identical band -- rather than
+   * one of them measuring the other's chrome and reproducing the answer. A
+   * derived constant that exists to keep a copy honest is a copy. */
+  --pt-status-h: 18px;
 
   /* Safe areas. viewport-fit=cover is set in index.html, so these are live.
    * Without it env() resolves to 0 and the bottom bar sits under the home

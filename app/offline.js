@@ -46,6 +46,44 @@ export function verify() {
   return askWorker(navigator.serviceWorker.controller, { type: 'PT_VERIFY' });
 }
 
+// ---------------------------------------------------------------------------
+// LOOKING FOR A NEW BUILD, which is a different question from verify().
+// Added 2026-08-09.
+//
+// verify() asks the CURRENT controller to audit ITS OWN cache. It answers "is
+// the build I am running complete", and it is the right question for the
+// offline readout, which is about surviving a flight. It cannot answer "is
+// there a newer build", because the controller does not know one exists.
+//
+// Nothing in the app asked the second question. The consequence, reported from
+// a phone: a deployed update never arrived, and the button in settings labelled
+// CHECK AGAIN could not have found it, because it called verify().
+//
+// registration.update() is the question. It refetches sw.js, byte-compares, and
+// installs a new worker if the bytes differ -- which is also why
+// build-precache.js now stamps the version into sw.js itself. Without that
+// stamp sw.js is identical between builds and only the imported manifest moves.
+//
+// Throttled, because this is called on every return to the foreground and an
+// app-switch is not a rare event. The window is deliberately short: the cost of
+// a check is one conditional request, and the cost of missing one is the bug
+// this exists to fix.
+const UPDATE_THROTTLE_MS = 30_000;
+let lastUpdateCheck = 0;
+
+export function checkForUpdate({ force = false } = {}) {
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return Promise.resolve(false);
+  const now = Date.now();
+  if (!force && now - lastUpdateCheck < UPDATE_THROTTLE_MS) return Promise.resolve(false);
+  lastUpdateCheck = now;
+  return navigator.serviceWorker.getRegistration()
+    .then((reg) => (reg ? reg.update().then(() => true) : false))
+    // An update check fails on any network the app is designed to be used
+    // without. That is not an error state: the installed build still works, and
+    // the readout already says so.
+    .catch(() => false);
+}
+
 // Collect a message the share target left. The worker took the POST body,
 // stashed it and 303'd here. Read once and delete, or a share would re-open
 // somebody's picture on the next launch.
@@ -67,8 +105,32 @@ export async function takeInbox() {
 }
 
 // The user's call, from settings. See sw.js for the mixed-build failure.
+//
+// AND THEN THE PAGE HAS TO RELOAD. Added 2026-08-09.
+//
+// This used to be the postMessage alone, and that half of the job is the half
+// that is invisible. skipWaiting() plus the clients.claim() in sw.js's activate
+// handler makes the NEW worker control this page immediately -- so the version
+// in the readout changes, the offline state goes green, and every module the
+// app is actually executing is still the old build, because it was imported
+// into memory before any of this happened and nothing re-imports it.
+//
+// The user taps a button called APPLY UPDATE, watches the version number
+// change, and gets the same app. That is a worse failure than the update not
+// arriving at all, because it looks like it worked.
+//
+// The reload is armed BEFORE the message goes out, once, on controllerchange.
+// `reloading` guards the classic loop: controllerchange also fires on the very
+// first load when a worker takes control of a page that had none, and reloading
+// there would put the app in a refresh cycle on first run.
+let reloading = false;
 export function applyUpdate() {
   if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    window.location.reload();
+  }, { once: true });
   navigator.serviceWorker.getRegistration().then((reg) => {
     if (reg && reg.waiting) reg.waiting.postMessage({ type: 'PT_ACTIVATE_UPDATE' });
   });
@@ -134,7 +196,25 @@ export function startOffline({ store, slot }) {
 
   // Relative, resolving against the document rather than this module. On GitHub
   // Pages that is /plane-text/sw.js.
-  navigator.serviceWorker.register('sw.js').then((reg) => {
+  //
+  // updateViaCache: 'none' is the one that was missing, and it is why a
+  // deployed update did not reach a phone. Added 2026-08-09.
+  //
+  // The default is 'imports': the browser bypasses the HTTP cache when it
+  // refetches sw.js for an update check, but serves anything sw.js pulls in
+  // with importScripts() from the HTTP cache like an ordinary subresource. What
+  // sw.js pulls in is app/precache-manifest.classic.js, and that file is where
+  // the version lives -- sw.js's own bytes are the same in every build. So the
+  // update check refetched the one file that never changes and read the version
+  // out of the HTTP cache, concluded nothing had moved, and threw away the new
+  // build. Pages serves assets with a short max-age, so this closed the window
+  // by minutes rather than forever, but combined with nothing ever CALLING an
+  // update check it was indistinguishable from forever.
+  //
+  // 'none' takes both files off the HTTP cache for update purposes. It costs
+  // one conditional request per check, on a check that happens at most twice a
+  // minute, and only ever for the two smallest files in the app.
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
     const noteWaiting = () => { if (reg.waiting) patch({ update: true }); };
     noteWaiting();
     reg.addEventListener('updatefound', () => {
@@ -144,6 +224,9 @@ export function startOffline({ store, slot }) {
         if (installing.state === 'installed') { noteWaiting(); run(); }
       });
     });
+    // One check on load, past the throttle. A cold start is the moment the user
+    // is most likely to be on a network and least likely to mind the request.
+    checkForUpdate({ force: true });
   }).catch((err) => {
     // Named rather than swallowed: this is the difference between the app
     // working on a plane and not.
@@ -158,7 +241,21 @@ export function startOffline({ store, slot }) {
 
   // And on return to the foreground, which on a phone is how most sessions
   // start. Catches a worker that finished installing while backgrounded.
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) run(); });
+  //
+  // checkForUpdate() as well as run(), added 2026-08-09. run() only audits the
+  // build already installed; on its own this handler could never notice a new
+  // one. That mattered more here than anywhere else in the app: the browser
+  // looks for a new worker on NAVIGATION, this app is hash-routed so it never
+  // issues one after the first load, and resuming an installed PWA from the app
+  // switcher is not a navigation either. An installed Plane Text could run for
+  // weeks without the browser ever asking whether a newer build existed.
+  //
+  // checkForUpdate throttles itself, so flicking between apps costs nothing.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    run();
+    checkForUpdate();
+  });
 
   run();
 }

@@ -6,7 +6,7 @@
 //   importScripts('app/precache-manifest.classic.js');
 //   self.PRECACHE.map(function (p) { return new URL(p, self.location).href; });
 
-self.PRECACHE_VERSION = 'pt-0e30510887e5';
+self.PRECACHE_VERSION = 'pt-53915b62074e';
 
 self.PRECACHE = [
   'app/actionbar.css',
@@ -40,9 +40,13 @@ self.PRECACHE = [
   'app/screens/settings.js',
   'app/screens/size-test.js',
   'app/shell.css',
+  'app/sizeslider.css',
+  'app/sizeslider.js',
   'app/state.js',
   'app/stylegesture.js',
   'app/thumb.js',
+  'app/thumbstrip.css',
+  'app/thumbstrip.js',
   'app/tokens.css',
   'app/viewfinder.js',
   'app/words.js',

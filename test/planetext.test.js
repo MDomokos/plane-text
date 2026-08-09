@@ -1820,15 +1820,37 @@ test('the stage is reserved by the shell, so the picture cannot move between scr
   // And no picture screen may reintroduce a column that sizes the stage. This
   // is the actual regression to guard: the bug comes back the moment someone
   // adds `flex: 1` to a stage again.
-  for (const p of ['app/screens/capture.css', 'app/screens/compose.css']) {
+  //
+  // `paste` joined this list on 2026-08-09, when it became the gallery. It was
+  // the one screen legitimately outside it before -- a scrolling form with no
+  // stage at all -- and it is now the third screen that puts a picture in the
+  // reserved box, which makes it the third place the box can be got wrong.
+  for (const p of ['app/screens/capture.css', 'app/screens/compose.css', 'app/screens/paste.css']) {
     const css = read(p);
-    assert.ok(!/\.(sc-stage|sc-view-stage)\s*\{[^}]*flex:\s*1/s.test(css), `${p}: the stage must not size itself`);
-    assert.ok(!/\.(sc-capture|sc-view)\s*\{[^}]*flex-direction:\s*column/s.test(css), `${p}: the screen must not own the column`);
+    assert.ok(!/\.(sc-stage|sc-view-stage|sc-open-stage)\s*\{[^}]*flex:\s*1/s.test(css), `${p}: the stage must not size itself`);
+    assert.ok(!/\.(sc-capture|sc-view|sc-open)\s*\{[^}]*flex-direction:\s*column/s.test(css), `${p}: the screen must not own the column`);
+    // And none of them may pad the stage. Padding on the measured box shrinks
+    // the art on that screen only, which is the same bug arrived at from the
+    // other side: the gallery's empty state wants a frame gutter and has to put
+    // it on its own child instead.
+    assert.ok(!/\.app-stage\s*\{/.test(css), `${p}: .app-stage belongs to the shell`);
   }
 
-  // Both picture screens build the shell's frame rather than their own.
-  for (const p of ['app/screens/capture.js', 'app/screens/compose.js']) {
+  // All three picture screens build the shell's frame rather than their own.
+  for (const p of ['app/screens/capture.js', 'app/screens/compose.js', 'app/screens/paste.js']) {
     assert.match(read(p), /className = '[\w-]+ app-frame'/, `${p}: must build .app-frame`);
+  }
+
+  // And the shell must give all three the same container: no padding, no
+  // scrolling. `paste` kept a --pt-space-4 gutter and its own bottom
+  // reservation until it became a picture screen, and a padded container is
+  // precisely what makes one stage a different size from another.
+  for (const route of ['capture', 'compose', 'paste']) {
+    assert.match(
+      shell,
+      new RegExp(`body\\[data-route="${route}"\\] \\.app-screen[^{]*\\{[^}]*padding:\\s*0`, 's'),
+      `${route}: the screen container must not pad the frame`,
+    );
   }
 
   // The capture screen must not wipe .app-screen off the container. It did,
@@ -1915,6 +1937,123 @@ test('recents can be pruned, updated in place, and states its own cap', async ()
   assert.deepEqual(recents.update('nothing', ''), []);
 });
 
+test('the size slider is one component, and neither screen writes the field it drives', async () => {
+  // The owner: "be able to edit the line count in the live viewfinder, not just
+  // after the image was taken." The control existed only on compose, so the
+  // grid could only be chosen after the shot -- against capture.js's own header
+  // argument that "WYSIWYG here covers size as well as style".
+  //
+  // The risk in granting that is a second copy. app/sizeslider.css is a careful
+  // rebuild of input[type=range] from the design system's parts, and it
+  // documents two rules that are invisible when broken: -webkit-appearance:none
+  // has to be set on the input AND on the thumb pseudo-element, and the WebKit
+  // and Firefox pseudo-elements cannot be merged into one selector list because
+  // an unknown pseudo-element invalidates the whole rule in both engines. A
+  // copy that lost either would look wrong on one platform only.
+  //
+  // So this asserts the same thing the thumbstrip test asserts: one module, and
+  // no screen re-implementing it.
+  const { readFileSync } = await import('node:fs');
+  const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  const decomment = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  const capture = decomment(read('app/screens/capture.js'));
+  const compose = decomment(read('app/screens/compose.js'));
+  for (const [name, js] of [['capture', capture], ['compose', compose]]) {
+    assert.match(js, /from '\.\.\/sizeslider\.js'/, `${name} must get its slider from the component`);
+    assert.ok(!/type = 'range'|createElement\('input'\)/.test(js), `${name} must not build its own range input`);
+    assert.ok(!/pt-slider|pt-tick|sc-slider|sc-tick/.test(js), `${name} must not render its own track or ticks`);
+    assert.ok(!/DEVICE_MARKERS|function sliderTicks/.test(js), `${name} must not carry its own tick geometry`);
+  }
+
+  // And no second stylesheet. The rules live in exactly one place, and as of
+  // 2026-08-09 that place is the component's own sheet rather than the viewer
+  // screen's. It was compose.css, which meant capture rendered correctly only
+  // because index.html links every screen sheet on every route.
+  for (const p of ['app/screens/capture.css', 'app/screens/compose.css']) {
+    assert.ok(!/::-webkit-slider|::-moz-range/.test(decomment(read(p))),
+      `${p}: the range input is rebuilt in one stylesheet, not two: see app/sizeslider.css`);
+  }
+  // Not merely moved: no screen sheet may keep an orphaned selector for it
+  // either, or the rules grow a second home the next time someone fills one in.
+  for (const p of ['app/screens/capture.css', 'app/screens/compose.css', 'app/screens/paste.css', 'app/screens/settings.css']) {
+    assert.ok(!/\.sc-slider|\.sc-tick|\.sc-view-slider/.test(decomment(read(p))),
+      `${p}: the slider's selectors belong to app/sizeslider.css`);
+  }
+
+  // The two hazards, asserted in the file that now carries them. Both are the
+  // kind of mistake a tidy-up makes and no desktop browser reports.
+  const sliderCss = read('app/sizeslider.css');
+  assert.match(sliderCss, /\.pt-slider-input\s*\{[^}]*-webkit-appearance:\s*none/s,
+    '-webkit-appearance: none on the input');
+  assert.match(sliderCss, /::-webkit-slider-thumb\s*\{[^}]*-webkit-appearance:\s*none/s,
+    'and again on the thumb, or iOS draws its own on our track');
+  assert.ok(!/-webkit-slider-thumb\s*,|::-moz-range-thumb\s*,|,\s*\.pt-slider-input::-moz/.test(sliderCss),
+    'the WebKit and Firefox pseudo-elements must stay in separate rules: one selector list applies to neither');
+
+  // Linked and cached, or the control renders unstyled on the flight this app
+  // is for. Same pair of assertions the strip's stylesheet gets.
+  assert.ok(read('index.html').includes('app/sizeslider.css'), 'sizeslider.css must be linked');
+  const { PRECACHE } = await import('../app/precache-manifest.js');
+  assert.ok(PRECACHE.includes('app/sizeslider.css'), 'run `npm run precache`');
+  assert.ok(PRECACHE.includes('app/sizeslider.js'), 'run `npm run precache`');
+
+  // THE OWNERSHIP REPAIR. state.js's table names one owner per field and
+  // sizeChars' was `compose`. Two screens with a slider makes that a two-writer
+  // field, which is the problem styleId had and which was repaired rather than
+  // accepted. There is no equivalent repair here -- the owner asked for the
+  // control on both screens -- so it is applied one level down: the component
+  // is the only writer, and the table names the component.
+  //
+  // Greppable, which is the point of doing it that way, and greppable on BOTH
+  // screens as of 2026-08-09. It covered capture alone while compose still
+  // wrote the field from the inline control that predated the component; that
+  // control is gone, so the caveat in state.js's header is gone with it and
+  // this is what holds the row up instead.
+  assert.ok(!/sizeChars:/.test(capture), 'capture must not write sizeChars: the component owns the write');
+  assert.ok(!/sizeChars:/.test(compose), 'compose must not write sizeChars either: that was the last direct write');
+  assert.match(read('app/state.js'), /sizeChars\s+int, CHARACTERS\s+\S+\s+app\/sizeslider\.js/,
+    'the owner table must name the writer');
+  assert.match(decomment(read('app/sizeslider.js')), /store\.set\(\{ sizeChars:/, 'the component is the writer');
+
+  // Columns are DERIVED and never stored (state.js). The component hands `cols`
+  // to its callbacks so a caller never reaches for colsForChars() itself and
+  // gets the codec wrong, and that number has to come from the app's one
+  // conversion.
+  const slider = decomment(read('app/sizeslider.js'));
+  assert.match(slider, /currentCols/, 'cols must come from the app-wide conversion');
+  assert.ok(!/state\.set\(\{ cols|sizeCols/.test(slider), 'no column count is ever stored');
+
+  // The ticks moved with the control and are still pure, so the spec 5.4
+  // disagreement below stays testable without a DOM.
+  const { sliderTicks, DEVICE_MARKERS } = await import('../app/sizeslider.js');
+  const { sizeRange } = await import('../src/sizing.js');
+  assert.equal(DEVICE_MARKERS.length, 4);
+  assert.equal(sliderTicks(sizeRange()).filter((t) => t.device).length, 1);
+
+  // DRAG COST. The measurement that decided capture's repaint policy, pinned
+  // here because it is the reason the screen is allowed to repaint
+  // synchronously on an input event at all.
+  //
+  // The track is in characters and its one-step positions vastly outnumber the
+  // grids they produce. Everything the encoder emits -- cols, rows, and
+  // messageChars, which is cells + rows + WRAPPER_BUDGET -- is a function of
+  // the column count alone, so an input event that does not move the column
+  // count cannot change the picture or the readout, and skipping it is exact
+  // rather than approximate. capture skips on that test; if the ratio ever
+  // collapsed, so would the justification.
+  const { colsForChars } = await import('../src/sizing.js');
+  const range = sizeRange();
+  const grids = new Set();
+  for (let ch = range.minChars; ch <= range.maxChars; ch++) grids.add(colsForChars(CODEC.RAMP, ch));
+  const steps = range.maxChars - range.minChars + 1;
+  assert.ok(steps > 10000, `the character track should be fine-grained, got ${steps} steps`);
+  assert.ok(grids.size < steps / 100,
+    `most slider positions must be no-ops: ${grids.size} grids for ${steps} steps`);
+  assert.match(read('app/screens/capture.js'), /cols === paintedCols/,
+    'capture must skip a repaint when the derived column count has not moved');
+});
+
 test('the slider ticks admit that three of spec 5.4 four markers are off the range', async () => {
   // This is the contradiction implementing the ticks surfaced, and it is pinned
   // rather than papered over: spec 5.4 specifies a linear 40-355 COLUMN slider
@@ -1925,7 +2064,13 @@ test('the slider ticks admit that three of spec 5.4 four markers are off the ran
   //
   // If spec 5.4 is rewritten, or the range widens, this test is the thing that
   // notices.
-  const { sliderTicks } = await import('../app/screens/compose.js');
+  //
+  // Imported from the component, not from a screen. It was
+  // app/screens/compose.js until 2026-08-09, because that is where the ticks
+  // were built; a pure geometry function that a test has to reach into a screen
+  // module for is the same backwards arrangement as the stylesheet that moved
+  // in the same change. compose.js does not export it any more.
+  const { sliderTicks } = await import('../app/sizeslider.js');
   const { sizeRange, charsForCols } = await import('../src/sizing.js');
   const { CAPTURE_ASPECT } = await import('../src/constants.js');
 
@@ -1981,7 +2126,8 @@ test('every route in the table is reachable from the running app', async () => {
 test('the picture screens hold the 44px floor the action bar enforces in code', async () => {
   // The review's §4: "the 44px floor is enforced in one place and violated in
   // two". actionbar.js throws at runtime rather than ship a 43px slot, while
-  // .sc-style was 19px tall and .sc-thumb carried a hardcoded 10px label.
+  // .sc-style was 19px tall and the open screen's thumbnail carried a hardcoded
+  // 10px label.
   //
   // Either the floor is a rule and something checks it across all screens, or
   // it is a rule about the action bar. This is that check.
@@ -2008,33 +2154,52 @@ test('the picture screens hold the 44px floor the action bar enforces in code', 
   assert.match(captureCss, /\.sc-style::before\s*\{[^}]*top:\s*-\d/s, '.sc-style needs a 44px hit box');
   assert.match(captureCss, /\.sc-style::before\s*\{[^}]*bottom:\s*-\d/s, '.sc-style needs a 44px hit box');
 
-  // The two thumbnail deletes were in that list until 2026-08-09, and having
-  // them there was the bug. Both made the 44px from a 22px button pinned to the
-  // top-right corner of a 30px and a 46px thumbnail, so the expanded target
-  // covered half the thumbnail it annotates and ran into the next one: any tap
-  // on an old picture deleted it. The arithmetic is in compose.css.
+  // DELETE, AND THE EXCEPTION THAT IS NO LONGER ONE. Rewritten 2026-08-09,
+  // second pass, when the corner `×` became one labelled button.
   //
-  // A destructive control is the one place where a target you can miss costs
-  // less than a target you cannot, so these two sit under the floor on purpose
-  // and arm before they fire instead. That is the trade, and this asserts it is
-  // still paid for on both screens: no hit-box expansion, an armed state in the
-  // stylesheet, and a handler that reads the attribute before it removes
-  // anything.
-  for (const [css, js, sel] of [
-    ['app/screens/compose.css', 'app/screens/compose.js', '.sc-strip-del'],
-    ['app/screens/paste.css', 'app/screens/paste.js', '.sc-thumb-del'],
-  ]) {
-    assert.ok(
-      !new RegExp(`\\${sel}::before`).test(read(css)),
-      `${sel} must not expand its hit box: it sits on top of the thumbnail it deletes`,
-    );
-    assert.match(read(css), new RegExp(`\\${sel}\\[data-armed="1"\\]`), `${sel} needs a visible armed state`);
-    assert.match(read(js), /dataset\.armed !== '1'/, `${js}: delete must arm before it fires`);
+  // What this used to assert, and why: `.pt-thumb-del` was a 22px control, and
+  // this test held it there on purpose. Expanding it to 44 was the shipped bug
+  // -- the hit box covered half the thumbnail it annotated and ran into the next
+  // one, so a tap meant to select an old picture deleted it -- and the argument
+  // was that a destructive control is the one place a target you can miss costs
+  // less than a target you cannot.
+  //
+  // The owner asked for a real delete button instead, and a labelled button in
+  // the chrome band has nothing to overlap. So the exception is retired and the
+  // assertion inverts: this control must now MEET the floor the rest of the app
+  // is held to, and it must not come back as a per-thumbnail corner glyph.
+  //
+  // What does not change is the arming, which was never really payment for the
+  // small target: there is no undo, so one tap must not be able to lose a
+  // picture at any size. Same three things checked as before, one of them the
+  // other way round -- a control at the floor, an armed state in the stylesheet,
+  // and a handler that reads the attribute before it removes anything.
+  const stripCss = read('app/thumbstrip.css');
+  const stripJs = read('app/thumbstrip.js');
+
+  assert.match(
+    stripCss,
+    /\.pt-del\s*\{[^}]*min-height:\s*var\(--pt-tap\)/s,
+    '.pt-del must meet the tap minimum rather than argue its way under it',
+  );
+  assert.ok(
+    !/\.pt-del::before/.test(stripCss),
+    '.pt-del is already --pt-tap tall; a hit-box expansion on top of that is the corner-delete bug returning',
+  );
+  assert.match(stripCss, /\.pt-del\[data-armed="1"\]/, '.pt-del needs a visible armed state');
+  assert.match(stripJs, /dataset\.armed !== '1'/, 'thumbstrip.js: delete must arm before it fires');
+
+  // And the corner control is gone from both files, not merely unused. A
+  // stylesheet that still carries the old rule is a second delete waiting for
+  // someone to re-attach it.
+  for (const [name, src] of [['app/thumbstrip.css', stripCss], ['app/thumbstrip.js', stripJs]]) {
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    assert.ok(!/pt-thumb-del/.test(code), `${name}: the per-thumbnail corner delete must not survive anywhere`);
   }
 
   // And no stylesheet may carry an off-scale font size again. 10px is now a
   // token, which is the honest way to keep a deliberate exception.
-  for (const p of ['app/screens/capture.css', 'app/screens/compose.css', 'app/screens/paste.css', 'app/screens/settings.css', 'app/actionbar.css', 'app/shell.css']) {
+  for (const p of ['app/screens/capture.css', 'app/screens/compose.css', 'app/screens/paste.css', 'app/screens/settings.css', 'app/actionbar.css', 'app/sizeslider.css', 'app/thumbstrip.css', 'app/shell.css']) {
     const css = read(p).replace(/\/\*[\s\S]*?\*\//g, '');
     assert.ok(!/font-size:\s*\d+px/.test(css), `${p}: font sizes come from tokens, not from literals`);
   }
@@ -2043,4 +2208,248 @@ test('the picture screens hold the 44px floor the action bar enforces in code', 
   assert.ok(!/rgba\(255,\s*215,\s*0/.test(read('app/actionbar.css').replace(/\/\*[\s\S]*?\*\//g, '')), 'the accent wash is a token');
   assert.match(read('app/tokens.css'), /--pt-accent-wash-hi:/);
   assert.match(read('app/tokens.css'), /--pt-size-2xs:/);
+});
+
+test('the recents strip is built once, in one module, and is not gold', async () => {
+  // The owner's report was three sentences: the previews should be in the same
+  // place and at the same size on every screen, the thumbnails should be one
+  // UI, and the scrollbar should match the thin line styling. All three are the
+  // same finding, which is that the same eight entries out of the same
+  // recents.js cache were rendered by two functions written at different times:
+  // 30 x 40 against 46 x 60, a name on one and not the other, a selection
+  // underline on one and not the other, the cap note in two places in two
+  // colours, an empty state on one and nothing on the other, and the strip
+  // itself pinned to a fixed band on one screen and flowing mid-column on the
+  // other.
+  //
+  // app/thumbstrip.js exists so that cannot happen again, the same way
+  // app/actionbar.js exists. This asserts the module is the only implementation
+  // rather than a third one.
+  const { readFileSync } = await import('node:fs');
+  const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  const decomment = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  for (const screen of ['app/screens/compose.js', 'app/screens/paste.js']) {
+    const js = decomment(read(screen));
+    assert.match(js, /from '\.\.\/thumbstrip\.js'/, `${screen} must get its strip from the component`);
+    // A screen that reaches for paintThumb is a screen building its own
+    // thumbnail, which is where both of the old ones started.
+    assert.ok(!/paintThumb/.test(js), `${screen} must not paint its own thumbnails`);
+    assert.ok(!/sc-strip|sc-thumb|sc-recent/.test(js), `${screen} must not build its own strip`);
+  }
+  for (const sheet of ['app/screens/compose.css', 'app/screens/paste.css']) {
+    const css = decomment(read(sheet));
+    assert.ok(!/\.sc-strip|\.sc-thumb|\.sc-recent-/.test(css), `${sheet} must not style its own strip`);
+  }
+
+  // One size, one delete, one name, one selection mark, one empty state, and
+  // they are in the component. `.pt-thumb-del` became `.pt-del` on 2026-08-09:
+  // the control stopped belonging to a thumbnail, which is why it lost the word
+  // from its name, but it did not stop belonging to this module.
+  const strip = read('app/thumbstrip.css');
+  for (const sel of ['.pt-thumb-name', '.pt-thumb.is-on', '.pt-del', '.pt-strip-cap', '.pt-strip-empty']) {
+    assert.ok(strip.includes(sel), `thumbstrip.css owns ${sel}`);
+  }
+  // Neither screen may build a delete of its own now that it is not attached to
+  // a thumbnail. Both hand the component a host and it builds the button.
+  for (const screen of ['app/screens/compose.js', 'app/screens/paste.js']) {
+    const js = decomment(read(screen));
+    assert.match(js, /deleteHost:/, `${screen} must get its delete control from the component`);
+    assert.ok(!/recents\.remove/.test(js), `${screen} must not delete an entry behind the component's back`);
+  }
+  assert.match(strip, /--pt-thumb-w/);
+  assert.match(strip, /--pt-thumb-h/);
+  // Same place on every screen, and it is one declaration rather than a number
+  // each screen repeats. Both columns pin it to their own bottom.
+  assert.match(strip, /margin-top:\s*auto/, 'the strip pins itself to the bottom of its column');
+
+  // The stylesheet has to be loaded and cached, or the strip renders unstyled
+  // on the flight this app is for.
+  assert.ok(read('index.html').includes('app/thumbstrip.css'), 'thumbstrip.css must be linked');
+  const { PRECACHE } = await import('../app/precache-manifest.js');
+  assert.ok(PRECACHE.includes('app/thumbstrip.css'), 'run `npm run precache`');
+  assert.ok(PRECACHE.includes('app/thumbstrip.js'), 'run `npm run precache`');
+
+  // The scrollbar. It was 6px with an --pt-accent thumb on both strips, which
+  // put a gold scrollbar four pixels under a gold selection underline, against
+  // tokens.css's own "if two things on a screen are gold, one of them is
+  // wrong". The underline is the one that means something.
+  const bars = decomment(strip);
+  assert.match(bars, /scrollbar-color:\s*var\(--pt-line-strong\)/);
+  // The window ends at the first rule after the scrollbar block. That used to be
+  // `.pt-strip-item`, the wrapper that anchored the corner delete; with the
+  // corner delete gone the wrapper went too, and the thumbnail is the strip's
+  // direct child.
+  assert.ok(!/--pt-accent/.test(bars.slice(bars.indexOf('scrollbar-width'), bars.indexOf('.pt-thumb {'))), 'the scrollbar is a hairline, not the accent');
+  // And it is still drawn. Hiding it was the state before the gold bar, and it
+  // costs a desktop user the only signal that eight thumbnails scroll.
+  assert.ok(!/scrollbar-width:\s*none/.test(bars), 'the scrollbar stays visible on desktop');
+  assert.match(bars, /::-webkit-scrollbar\s*\{[^}]*height:\s*2px/, 'a hairline, and 2px is what the viewer band can spare');
+});
+
+test('the gallery opens on the latest message, and the big paste target is the empty state only', async () => {
+  // The owner's report: "the gallery should have a permanent place, by default
+  // always opening the latest image ... only if there are no saved images should
+  // there be the large full screen paste button."
+  //
+  // Both halves are one invariant with two sides, and getting either wrong is
+  // silent. Open on nothing and the screen looks broken with eight pictures
+  // saved; keep the target once there is something saved and the same action
+  // exists twice on one screen, which is the duplicate control the two-tile
+  // version of this screen was rejected for in the first place.
+  //
+  // The behavioural half of this -- that the entry actually paints, and that the
+  // target actually disappears -- is in test/smoke.mjs, which mounts the screen
+  // against a real DOM and a real recents cache. What can be asserted here is
+  // that the code says so, which is what catches the change that quietly drops
+  // one of the two branches.
+  const { readFileSync } = await import('node:fs');
+  const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  const paste = read('app/screens/paste.js');
+  const code = paste.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  // Slot 0, because recents.add() puts the newest first. Asserted as "reads the
+  // list and hands index 0 to show()" rather than as a literal, since the
+  // ordering itself is recents.js's contract and is pinned there.
+  assert.match(code, /recents\.list\(\)/, 'the gallery must read the cache to know what to open on');
+  assert.match(code, /if \(strip\.entries\(\)\.length\) show\(0\);/, 'mount must open on the most recent entry');
+  assert.match(code, /else showEmpty\(\);/, 'and fall back to the empty state when there is nothing');
+
+  // The stage holds exactly one of three things, and the target is one of them.
+  // A screen that shows the target and a picture at once is the duplicate
+  // control returning by another route.
+  assert.match(code, /function setMode\(mode\)/, 'the stage must have one owner of what is on it');
+  assert.match(code, /empty\.hidden = mode !== 'empty'/, 'the big target is a mode, not a permanent element');
+  assert.match(code, /pre\.hidden = mode !== 'picture'/);
+
+  // And it is genuinely the same target, not a new one: the screen still owns
+  // .sc-target and its two label lines, so the empty state did not quietly
+  // become a different control with the same job.
+  const css = read('app/screens/paste.css');
+  for (const sel of ['.sc-target', '.sc-target-lead', '.sc-target-sub', '.sc-target-note']) {
+    assert.ok(css.includes(sel), `paste.css owns ${sel}`);
+  }
+
+  // The library door survives as an action rather than as a row, and it still
+  // routes through capture's import sub-mode. Dropping the `?import=1` hop is
+  // the regression that would give an imported photo no moment at which style
+  // can be chosen -- see the header of capture.js.
+  assert.match(code, /navigate\('capture', \{ import: '1' \}\)/, 'the picker must still route through capture');
+  assert.match(code, /fileInput\.click\(\)/, 'the library door must still open the system picker');
+
+  // Everything the screen did before it was a gallery. Each of these is a path
+  // with no other test: a clipboard read that needs a gesture, a textarea for
+  // when that fails, a source cap that keeps a 12 MP photo out of memory, and
+  // the share-target inbox.
+  assert.match(code, /navigator\.clipboard\.readText\(\)/);
+  assert.match(code, /setMode\('field'\)/, 'the clipboard failure must still reveal the textarea');
+  assert.match(code, /const MAX_SOURCE_PX = 1600/);
+  assert.match(code, /takeSharedText\(\)/);
+
+  // DEFAULT_ROUTE is not this. "Opens the latest image by default" is about the
+  // gallery's own initial state; the app still opens on the camera.
+  const { DEFAULT_ROUTE } = await import('../app/router.js');
+  assert.equal(DEFAULT_ROUTE, 'capture', 'the gallery is a destination, not the front door');
+});
+
+// ---------------------------------------------------------------------------
+// The flip control, 2026-08-09. Both findings below were shipped bugs, and both
+// are invisible to every other test here because they need a real WebGL context
+// and a real MediaStream to reproduce. Source assertions are the only guard
+// available, so they are written against the specific mistake rather than
+// against a shape, and each carries the symptom it caused.
+// ---------------------------------------------------------------------------
+
+test('a canvas element is never handed to two viewfinders, and the front camera mirrors in the pixels', async () => {
+  const { readFileSync } = await import('node:fs');
+  const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  // THE HANG. viewfinder.stop() ends in WEBGL_lose_context.loseContext(), and
+  // getContext() returns the SAME context object for an element that already
+  // has one. So the second startViewfinder() on one element got a dead WebGL
+  // context, fell through to the 2D path, and got null from getContext('2d') --
+  // an element holding a WebGL context cannot also hold a 2D one -- and threw
+  // out of the constructor. The flip left vf null: no loop, no repaint, and the
+  // screen only came back after navigating away and mounting a fresh canvas.
+  const capture = strip(read('app/screens/capture.js'));
+
+  // The element must come from a factory, and startSource() must call it. A
+  // single `const canvas = document.createElement('canvas')` in mount() is
+  // exactly the code that broke, so it must not come back.
+  assert.match(capture, /function makeArtCanvas\(\)/, 'the art canvas must be built through a factory');
+  assert.ok(
+    /async function startSource\(\)[\s\S]*?makeArtCanvas\(\)[\s\S]*?startViewfinder\(/.test(capture),
+    'startSource() must mount a fresh canvas before every startViewfinder()',
+  );
+  assert.ok(
+    !/\bconst canvas = document\.createElement\('canvas'\)/.test(capture),
+    'the art canvas must not be a per-mount constant: a second viewfinder needs a second element',
+  );
+
+  // And the surface must be read back off the viewfinder, because a lost GL
+  // context is recovered by putting a fresh element in the old one's place and
+  // the old one is then detached, where replaceWith() is a silent no-op.
+  assert.match(capture, /canvas = vf\.canvas/, 'capture must re-read the live surface from the viewfinder');
+
+  // The net on the other side: startViewfinder must survive being handed a
+  // poisoned element rather than throw out of its own constructor.
+  const viewfinder = strip(read('app/viewfinder.js'));
+  assert.ok(
+    /function useCanvas2d\(\)[\s\S]*?if \(!ctx2d\)/.test(viewfinder),
+    'useCanvas2d must handle a null 2D context instead of throwing on it',
+  );
+
+  // MIRRORING. It is in the pixel path in camera.js, driven by the track's own
+  // reported facing, and it covers the PREVIEW ONLY.
+  //
+  // This assertion said "exactly two" until 2026-08-09, second pass, and the
+  // comment above it argued for it: the preview is a render of the artefact the
+  // shutter sends, so mirroring one grab and not the other breaks WYSIWYG. The
+  // repo owner overruled that -- "fix the screen and image mirroring to match
+  // other camera apps" -- and stock behaviour is preview mirrored, file not.
+  //
+  // The cost is real and is not hidden: committing a selfie flips the picture
+  // between the viewfinder and compose, because compose renders the unmirrored
+  // still. It is written out at the `mirrored` const in camera.js and again at
+  // commit() in capture.js. This test is the third place, because the number
+  // below is the whole of the change and a well-meaning "the still should match
+  // the preview" is exactly the edit it has to catch.
+  const camera = strip(read('app/camera.js'));
+  assert.match(camera, /getSettings\(\)\.facingMode/, 'the flip must follow the track, not the request');
+  assert.equal(
+    (camera.match(/setTransform\(-1, 0, 0, 1,/g) || []).length, 1,
+    'exactly ONE mirrored draw: the preview downscale. The still is true to the lens.',
+  );
+  // And it is the preview's draw, not the still's. Counting alone would pass if
+  // the two swapped, which is the same bug with the sign flipped: a mirrored
+  // photograph under an unmirrored viewfinder.
+  const drawDown = camera.slice(camera.indexOf('function drawDown('), camera.indexOf('function cropRect('));
+  assert.match(drawDown, /if \(mirrored\) out\.ctx\.setTransform\(-1, 0, 0, 1,/, 'the preview downscale is the mirrored one');
+  const stillStart = camera.indexOf('grabStill() {');
+  const grabStill = camera.slice(stillStart, camera.indexOf('stop() {', stillStart));
+  assert.ok(!/setTransform/.test(grabStill), 'grabStill must not mirror: the photograph is true to the lens');
+
+  assert.match(camera, /get mirrored\(\) \{ return mirrored; \}/, 'openCamera must report its own facing');
+  assert.match(camera, /get mirrored\(\) \{ return false; \}/, 'openStill must never mirror: an import has no facing');
+
+  // The surprise has to be admitted in prose, where someone hitting it will
+  // look, and there are exactly two such places: the decision itself, and the
+  // code that hands the still onward to compose. Read UNSTRIPPED, because it is
+  // the comments that are the contract here -- a flip nobody wrote down is the
+  // failure, not a flip.
+  assert.match(read('app/camera.js'), /REVERSED/, 'camera.js must record that mirroring both was reversed');
+  assert.match(read('app/camera.js'), /FLIPS THE PICTURE/, 'camera.js must state what the reversal costs');
+  assert.match(read('app/screens/capture.js'), /FLIPS HERE/,
+    'capture.js commit() must warn that committing a selfie flips the picture');
+
+  // Not a CSS transform on the canvas. That would leave grabStill() unmirrored,
+  // and compose renders the same art into a <pre>, where it would not apply at
+  // all.
+  for (const p of ['app/screens/capture.css', 'app/screens/compose.css', 'app/shell.css']) {
+    assert.ok(
+      !/scaleX?\(\s*-1/.test(strip(read(p))),
+      `${p}: mirroring belongs in the pixels, not in a transform the still cannot see`,
+    );
+  }
 });

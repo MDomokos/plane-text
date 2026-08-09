@@ -18,6 +18,12 @@
 // tone endpoints and the same reasoning applies to resolution: a preview exists
 // to communicate framing, and a still exists to be sent.
 //
+// They differ in a third way as of the second pass on 2026-08-09, and it is the
+// only one a user can see: on the front camera the PREVIEW is mirrored and the
+// STILL is not, which is what every other camera app does. It flips the picture
+// at the compose navigation. The full argument, the reversal it came from and
+// the cost are at the `mirrored` const inside openCamera().
+//
 // ---------------------------------------------------------------------------
 // WHY THE PREVIEW DOWNSCALES WITH drawImage AND NOT A CELL LOOP.
 //
@@ -212,7 +218,95 @@ export async function openCamera({ facingMode = 'environment', host = null } = {
   // A track can report 0x0 for a frame or two after play() resolves, and a
   // grab at 0x0 throws from drawImage rather than returning something a screen
   // can show. Wait for real dimensions, but not forever.
+  //
+  // This resolving on the timeout rather than on a frame is NOT a failure and
+  // must not be treated as one. Re-acquiring the sensor immediately after
+  // track.stop() on the same hardware -- which is exactly what the flip control
+  // does -- routinely takes longer than the deadline, and the honest answer is
+  // to hand back a camera that is not producing frames yet. Every grab below
+  // returns null while videoWidth is 0, `live` reports false, and the
+  // viewfinder's loop keeps ticking and paints the moment frames start. See the
+  // null-frame note in viewfinder.js tick().
   await waitForFrame(video);
+
+  // ---------------------------------------------------------------------------
+  // MIRRORING THE FRONT CAMERA: THE PREVIEW ONLY. 2026-08-09, SECOND PASS.
+  //
+  // Read off the track, not off the request. `facingMode: { ideal: ... }` is a
+  // preference: a laptop with one webcam hands back that webcam whatever we
+  // asked for, so the request is not evidence about which way the lens points.
+  // getSettings().facingMode is the device's own answer. Where it is absent --
+  // Firefox reports no facingMode on desktop -- fall back to what we asked for,
+  // which is the only other thing anyone here knows. This is per-camera state
+  // captured at open, never a module-level flag: openStill() below wears the
+  // same interface for an imported library photo, and an imported photo has no
+  // facing to mirror by.
+  //
+  // THIS FILE MIRRORED BOTH GRABS EARLIER TODAY. THAT IS REVERSED.
+  //
+  // The argument it was reversed from, stated fairly because it is not a silly
+  // one: a stock camera app can mirror the preview and save the file unmirrored
+  // because the preview is not the product, and here it is. This app's promise,
+  // stated in capture.js's header, in tokens.css and in state.js, is WYSIWYG --
+  // the viewfinder is a render of the artefact the shutter sends, at the output
+  // column count, through the output codec. Mirroring one grab and not the
+  // other therefore breaks the one property the whole screen is built around.
+  // So both mirrored, and the accepted cost was that lettering in a selfie --
+  // a sign, a book cover, a T-shirt -- read backwards in the message as well as
+  // in the preview, where a stock app would have got it right.
+  //
+  // The repo owner overruled it: "Fix the screen and image mirroring to match
+  // other camera apps." Stock behaviour wins, and it wins on the ground the
+  // earlier argument never addressed -- a photograph of the world is evidence
+  // about the world, and a camera that silently hands back a left-right
+  // inversion of what its lens saw is wrong about the scene in a way no amount
+  // of internal consistency repairs. Every other camera the user owns agrees.
+  //
+  // SO THE PREVIEW MIRRORS AND THE STILL DOES NOT, AND THAT COSTS SOMETHING.
+  //
+  // Committing a selfie now FLIPS THE PICTURE between the viewfinder and the
+  // compose screen. There is no way to hide that and no attempt is made to:
+  // compose renders the unmirrored still, so the art the user is asked to send
+  // is a mirror image of the art they framed. On a face nobody will notice; on
+  // anything with lettering or an asymmetric composition they will, and the
+  // moment of surprise is the navigation, not the shutter. The same note is at
+  // commit() in app/screens/capture.js, which is the code that hands the still
+  // onward and the place someone hitting the surprise will look first.
+  //
+  // ONE PLACE DECIDES. Do not "fix" the flip with a second transform on the
+  // compose side, on the canvas, or in the wrapper. Two transforms that have to
+  // agree is the shape of every bug this file already carries a paragraph
+  // about; if the decision is ever reversed again, it is reversed here, in the
+  // pixel path, in `drawDown` -- which is also the only form that works at all,
+  // since compose renders into a <pre> where a canvas transform does not exist.
+  //
+  // THE CROP. Re-checked now that only one path mirrors, because the claim
+  // written here before was true of the code it described and is HALF WRONG
+  // about this one.
+  //
+  // Still true: cropRect() below is centred on both axes, so on the preview
+  // path mirroring the destination is the same image as mirroring the source
+  // and then cropping. The mirror can therefore stay on the last draw of the
+  // halving chain, which is where drawDown() puts it.
+  //
+  // No longer true: that encode()'s focus-point crop needs no thought. It runs
+  // on the STILL, which is now unmirrored, while the preview a focus point
+  // would be read off is mirrored -- so the two frames disagree about which way
+  // round x runs, which they did not when both mirrored. Nothing in the app
+  // passes a focus point today (it defaults to 0.5, which is its own mirror
+  // image; only tools/crop.js and tools/bench.js pass anything else), so there
+  // is nothing to correct yet. But the advice this comment used to give -- flip
+  // it, focusX -> 1 - focusX, at the point the tap is taken -- was WRONG when
+  // it was written, because a tap at x on a mirrored preview was at x in a
+  // mirrored still and needed no flip at all. It is right now, for the opposite
+  // reason. If tap-to-focus is ever built: `mirrored` above is the flag, the
+  // flip belongs at the tap site in capture.js, and this paragraph is why.
+  // ---------------------------------------------------------------------------
+  const track = stream.getVideoTracks()[0];
+  const reported = track && typeof track.getSettings === 'function'
+    ? track.getSettings().facingMode
+    : null;
+  const mirrored = (reported || facingMode) === 'user';
 
   // One canvas per distinct grab size, kept warm. `willReadFrequently` is what
   // keeps the buffer on the CPU side: without it every getImageData is a
@@ -265,8 +359,21 @@ export async function openCamera({ facingMode = 'environment', host = null } = {
       source = step.canvas;
       cx = 0; cy = 0; cw = nw; ch = nh;
     }
+    // The flip goes on the LAST draw only, and as of the reversal above this is
+    // the ONLY mirrored draw in the file. Mirroring an intermediate of the
+    // halving chain would mirror again on every subsequent step, so at two
+    // halvings the frame would come out the right way round and the bug would
+    // depend on the downscale ratio -- which is to say on the column count.
+    //
+    // setTransform rather than scale(), and inside a save/restore pair: these
+    // canvases are kept warm across frames, so a relative transform would
+    // accumulate and an unbalanced one would leak into the next grab at this
+    // size. The absolute form is idempotent whatever state it finds.
     const out = canvasFor(dw, dh);
+    out.ctx.save();
+    if (mirrored) out.ctx.setTransform(-1, 0, 0, 1, dw, 0);
     out.ctx.drawImage(source, cx, cy, cw, ch, 0, 0, dw, dh);
+    out.ctx.restore();
     return out;
   }
 
@@ -288,6 +395,14 @@ export async function openCamera({ facingMode = 'environment', host = null } = {
     get width() { return video.videoWidth; },
     get height() { return video.videoHeight; },
     get live() { return !stopped && video.videoWidth > 0; },
+    // Exposed so the decision is inspectable rather than inferred from a
+    // picture, and so a test can pin that openStill() answers false.
+    //
+    // It reports what the PREVIEW does. Since the reversal above the still is
+    // never mirrored, so there is no second flag to report and no way for the
+    // two to be asked about separately -- which is deliberate: one place
+    // decides.
+    get mirrored() { return mirrored; },
 
     // A frame at the dot resolution of a `cols`-wide grid in `codec`.
     //
@@ -349,6 +464,15 @@ export async function openCamera({ facingMode = 'environment', host = null } = {
       const w = video.videoWidth;
       const h = video.videoHeight;
       if (!w || !h) return null;
+      // NOT MIRRORED, on purpose, whichever way the lens points. This is the
+      // photograph, and a photograph is true to the lens; the mirror is the
+      // viewfinder's, and the viewfinder's alone. See the reversal note above
+      // for the argument and for what it costs at the compose navigation.
+      //
+      // No save/restore pair, because there is no transform here to balance.
+      // These canvases are shared with drawDown() and kept warm across frames,
+      // so the identity transform this draw relies on is not an assumption: it
+      // is what drawDown()'s own restore() guarantees on the way out.
       const out = canvasFor(w, h);
       out.ctx.drawImage(video, 0, 0, w, h);
       const img = out.ctx.getImageData(0, 0, w, h);
@@ -450,6 +574,13 @@ export function openStill(photo) {
     // Always live while mounted. There is no frame to wait for, which is why
     // the frozen sub-mode never shows the "waiting for the camera" path.
     get live() { return !stopped; },
+    // Never. An imported photo has no facing, so there is nothing to mirror
+    // BY, and mirroring it would silently flip a picture the user already has
+    // the right way round on their phone. This is the reason the flag lives on
+    // the camera object rather than being read from state.facing wherever a
+    // grab happens: state.facing is whatever the last live open set, and it
+    // survives into the import sub-mode, which does not open a camera at all.
+    get mirrored() { return false; },
 
     // Deliberately no multi-step downscale. openCamera() steps down in halves
     // because a 1920px video frame to a 130px grid is a 15x reduction and one

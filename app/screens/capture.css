@@ -299,7 +299,7 @@
  * pinned to the right edge next to 300px of nothing.
  *
  * Every other hideable element in the app already carries its own `[hidden]`
- * rule for exactly this reason (.sc-field, .sc-slider, .sc-set-row, .app-back).
+ * rule for exactly this reason (.sc-field, .pt-slider, .sc-set-row, .app-back).
  * This one element was missed, and it is the one that only appears when
  * something has already gone wrong, which is why nobody saw it. */
 .sc-art[hidden] { display: none; }
@@ -369,9 +369,65 @@
 
 /* Bottom band -------------------------------------------------------------- */
 
-/* Capture's band is mostly empty, and that is the deal: it is sized to the
- * viewer's contents so the picture above it does not move. The readout sits at
- * the top of the band, against the picture, where it was before. */
+/* WHAT IS IN THE 176 PIXELS, AND WHAT IS LEFT. Rewritten 2026-08-09, when the
+ * size slider moved in here.
+ *
+ * --pt-chrome-bot is 176px and it is NOT changing for this, or for anything.
+ * Both bands are sized to their tallest consumer -- the viewer -- and every
+ * picture screen is laid out against them, so a screen that wants more room is
+ * asking for the picture to move on every other screen. tokens.css spends
+ * sixty lines on why, ending in "do not override them per route". The question
+ * this comment answers is the other one: does what capture wants to put in the
+ * band FIT in the band it already has.
+ *
+ * The band is .app-chrome-bot (shell.css): a flex column, justify-content
+ * flex-start, padding-top --pt-space-1, gap --pt-space-1 between rows. So the
+ * arithmetic is padding + rows + gaps, and every row's height is its own.
+ *
+ *   BEFORE                                              AFTER
+ *   padding-top   --pt-space-1              4           4
+ *   .sc-readout   --pt-space-2 padding-top  8           8
+ *                 12px type at line-height  18          18
+ *                 1.5 (--pt-size-xs, body)
+ *   gap           --pt-space-1              4           4
+ *   .pt-slider    --pt-tap, the input's own  -          44
+ *                 height. See below: the
+ *                 ticks add nothing.
+ *   gap           --pt-space-1              -           4
+ *   .app-status   --pt-status-h             18          18
+ *                                          ----        ----
+ *                                           52 of 176   100 of 176
+ *
+ * So: 124px spare before, 76px spare after. The band was nearly empty and is
+ * now a little over half full. For contrast the viewer's is 173 of 176 -- fit
+ * line 21 + chars 18 + slider 44 + strip 52 + status 18 plus gaps and padding
+ * -- which is the consumer that sized the token in the first place, and the
+ * reason capture had 124px of room it was not using.
+ *
+ * THE TICKS ADD NOTHING, and that is load-bearing rather than incidental.
+ * .pt-slider-ticks is position:absolute with height 0 inside a position:relative
+ * .pt-slider, so the row is exactly the input's --pt-tap. The deepest thing the
+ * ticks draw is a device label: top calc(--pt-tap / 2) = 22, plus the 9px mark,
+ * plus one --pt-size-2xs line at line-height 1 = 10, ending at 41 of the 44.
+ * Three pixels inside the row it is drawn in, so nothing escapes into the gap
+ * and nothing is clipped by the band's overflow:hidden.
+ *
+ * The row order is readout, slider, status, matching the viewer's text-then-
+ * slider-then-status. The readout stays at the TOP of the band, against the
+ * picture, where it has always been: it describes the picture, and the control
+ * that changes it sits below it rather than between them. */
+
+/* The slider itself is app/sizeslider.js and its rules are app/sizeslider.css
+ * -- one definition, shared, not copied. They were the SLIDER and Ticks blocks
+ * in compose.css until 2026-08-09, which meant this screen's control was styled
+ * by the viewer's stylesheet and worked only because index.html links every
+ * screen sheet on every route. Nothing about the control is this screen's,
+ * including its width, which clamps to --pt-art-w the same way every other row
+ * here does. */
+
+/* Capture's band is no longer nearly empty, but the deal is unchanged: it is
+ * sized to the viewer's contents so the picture above it does not move, and
+ * capture spends what it needs of that inside the reservation. */
 .sc-readout {
   flex: none;
   width: 100%;

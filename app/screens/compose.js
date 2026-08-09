@@ -30,6 +30,12 @@
 //    `paste`, so moving between pictures cost BACK, a screen and a tap. Strip
 //    and swipe both: the swipe costs no height, the strip makes it findable.
 //
+//    The strip itself is app/thumbstrip.js as of the second pass on 2026-08-09.
+//    It was built here and again in paste.js, and the two copies had drifted on
+//    thumbnail size, the name label, the selection mark, the cap note and the
+//    empty state. What is left in this file is the half a viewer actually owns:
+//    which entry is on the stage, and what a swipe means.
+//
 //    One limit will look like a bug and is not. A recents entry is a message,
 //    with no source pixels to re-encode, so swiping off the live subject hides
 //    the size slider. That is what "the payload is the thumbnail" means
@@ -39,6 +45,13 @@
 //    with accent-color renders a round thumb on a pill track on iOS Safari and
 //    Android Chrome, against a house rule of one 2px radius on everything. It
 //    was the only element breaking that rule, directly under the picture.
+//
+//    The rebuild is app/sizeslider.js and app/sizeslider.css as of the second
+//    pass on 2026-08-09, for the reason the strip is a component: the owner
+//    asked for the same control in the live viewfinder, and a range input is a
+//    worse candidate for a second copy than a thumbnail is. Two of its rules
+//    are invisible when broken and would show up as "the slider looks wrong on
+//    iOS", which is a report nobody files from a desk.
 //
 // 4. There is a status line. Saving a TXT said nothing, and the clipboard
 //    fallback in share() overwrote the message name to report itself, with
@@ -53,13 +66,14 @@
 import { defineScreen } from '../screen.js';
 import { register } from '../router.js';
 import { currentStyle, currentCols } from '../state.js';
-import { sizeRange, colsForChars, charsForCols, baseLineHeight } from '../../src/sizing.js';
-import { CODEC, CAPTURE_ASPECT, advanceCssFor } from '../../src/constants.js';
+import { baseLineHeight } from '../../src/sizing.js';
+import { advanceCssFor } from '../../src/constants.js';
 import { actionBar } from '../actionbar.js';
+import { sizeSlider } from '../sizeslider.js';
 import { paintArt, autoFit, publishArtWidth, stageArtWidth, fitFontSize } from '../art.js';
 import { messageName, fileName } from '../words.js';
 import * as recents from '../recents.js';
-import { paintThumb } from '../thumb.js';
+import { thumbStrip } from '../thumbstrip.js';
 import { encodePhoto, getSubject, clearSubject, decodeMessage } from '../pipeline.js';
 
 const SAVE_FORMATS = [
@@ -77,49 +91,28 @@ const SAVE_FORMATS = [
 ];
 
 // ---------------------------------------------------------------------------
-// SLIDER TICKS, and the contradiction they exposed.
+// THE SLIDER, AND ITS TICKS, ARE NOT HERE ANY MORE. Moved 2026-08-09.
 //
-// Spec 5.4 specifies four device markers in COLUMNS on a linear 40 to 355
-// track. The slider had none, so "fits a phone" only appeared after you had
-// dragged past the point it describes.
+// This file used to own the control outright: DEVICE_MARKERS, sliderTicks(),
+// the wrapper, the input, the tick spans, and a `state.set({ sizeChars })` of
+// its own. All of it is app/sizeslider.js now, mounted below, because the owner
+// asked for the same control in the live viewfinder and a second copy of a
+// range input is the drift README.md opens with five instances of.
 //
-// Building them found that three of the four are off the slider. The
-// 2026-08-09 reversal moved the units to characters, on a range derived from
-// RAMP_COLS_MIN 65 to RAMP_COLS_MAX 130:
+// Two things went with it and are worth knowing where to find:
 //
-//   bubble   40 cols =  2,214 chars   below the minimum
-//   phone   108 cols = 15,696 chars   in range
-//   tablet  222 cols = 66,008 chars   above the maximum
-//   desktop 355 cols = 47,348 chars   above the maximum
+//   The spec 5.4 contradiction. Three of the four device markers are off the
+//   end of the range, because the 2026-08-09 reversal moved the slider to
+//   CHARACTERS and the spec was not updated with it. The note is in
+//   sizeslider.js above DEVICE_MARKERS, and two tests pin it.
 //
-// The desktop figure is spec 5.4's own and is itself stale: the aspect was
-// fixed portrait after that table was written. Same drift the test 'the desktop
-// slider marker is not comfortably inside the ceiling' pins from the other side.
+//   The write. sizeChars had `compose` as its owner in state.js's table and now
+//   has app/sizeslider.js, because two screens choose the size and exactly one
+//   module writes it. This screen must not set the field: a test greps it.
 //
-// So the one in-range marker is drawn where it falls, and the range's own
-// endpoints are labelled. Drawing three ticks off the end was not an option,
-// and one lonely marker reads as decoration. Spec 5.4 needs rewriting, which is
-// a decision, not a patch.
-const DEVICE_MARKERS = [
-  { cols: 40, label: 'BUBBLE' },
-  { cols: 108, label: 'PHONE' },
-  { cols: 222, label: 'TABLET' },
-  { cols: 355, label: 'DESKTOP' },
-];
-
-export function sliderTicks(range) {
-  const ticks = [];
-  for (const m of DEVICE_MARKERS) {
-    const chars = charsForCols(CODEC.RAMP, m.cols, CAPTURE_ASPECT);
-    if (chars <= range.minChars || chars >= range.maxChars) continue;
-    ticks.push({ chars, label: m.label, device: true });
-  }
-  // The endpoints, labelled with the column counts they actually are. Without
-  // these the track has one mark on it and reads as decoration.
-  ticks.unshift({ chars: range.minChars, label: `${colsForChars(CODEC.RAMP, range.minChars, CAPTURE_ASPECT)}`, device: false });
-  ticks.push({ chars: range.maxChars, label: `${colsForChars(CODEC.RAMP, range.maxChars, CAPTURE_ASPECT)}`, device: false });
-  return ticks;
-}
+// What stayed is what is genuinely this screen's, and it is all at the mount
+// below -- when the control is shown at all, how expensive its `input` is here,
+// and what a settled drag means for recents.
 
 export default register(defineScreen({
   id: 'compose',
@@ -149,21 +142,65 @@ export default register(defineScreen({
 
     const liveName = mine ? messageName(subject.word, new Date(subject.takenAt)) : subject.name;
 
+    // Order matters, which is why this sits above the DOM and not with the rest
+    // of the carousel: the live subject is written into recents BEFORE the strip
+    // is built, so it occupies slot 0 and the strip's first thumbnail is the
+    // picture you are looking at. The strip would otherwise open scrolled to
+    // somebody else's photograph.
+    //
+    // A placeholder message, because the encode has not run yet. The slot is
+    // what matters here; the real message is written into it at the end of
+    // mount, before the strip's second and final render.
+    if (mine) recents.add({ name: liveName, message: '\n', source: subject.source });
+
     // --- top band --------------------------------------------------------
+    //
+    // One row: the delete control, then the name. Both from the shell, because
+    // the gallery draws the identical row (shell.css .app-chrome-row).
+    //
+    // WHY DELETE IS UP HERE. Added 2026-08-09, when the per-thumbnail corner `×`
+    // was replaced by one labelled button. It had to be somewhere on both this
+    // screen and the gallery, at --pt-tap, and not on top of the picture. That
+    // leaves the two chrome bands, and the bottom one cannot have it: the budget
+    // in tokens.css is 172 of 176 used here, so a 44px row would overflow
+    // --pt-chrome-bot and start shrinking the picture on every screen at once.
+    // The top band is 44px sized by capture's style row, and this screen puts an
+    // 18px name line in it, so a --pt-tap control fits the band exactly with
+    // nothing to move.
+    //
+    // LEFT, not right. actionbar.js's reasoning, applied outside the action bar:
+    // for a right thumb the right edge is the easiest reach and the left the
+    // hardest, so the control you least want to hit by accident takes the hard
+    // side. The right corner of the top band is also where capture puts the
+    // gear, and a destructive control under the pixel someone reaches for out of
+    // habit is the double-tap hazard that file already warns about.
     const top = document.createElement('div');
     top.className = 'app-chrome-top';
+
+    const topRow = document.createElement('div');
+    topRow.className = 'app-chrome-row';
+
+    // Appended before the name so the grid columns land in DOM order. The
+    // button itself is built into this by thumbStrip(); the slot keeps its
+    // width whether or not there is one.
+    const delSlot = document.createElement('div');
+    delSlot.className = 'app-chrome-slot';
 
     // Name line. Provenance is the only thing distinguishing three otherwise
     // identical screens, so it is stated rather than implied.
     const label = document.createElement('p');
-    label.className = 'sc-view-name';
-    top.append(label);
+    label.className = 'app-name';
+
+    topRow.append(delSlot, label);
+    top.append(topRow);
 
     // --- stage -----------------------------------------------------------
     const stage = document.createElement('div');
     stage.className = 'app-stage sc-view-stage';
     const pre = document.createElement('pre');
-    pre.className = 'sc-view-art';
+    // The <pre> rule is the shell's as of 2026-08-09, because the gallery paints
+    // into the same object. See .app-art in shell.css.
+    pre.className = 'app-art';
     pre.setAttribute('role', 'img');
     stage.append(pre);
 
@@ -180,49 +217,81 @@ export default register(defineScreen({
     const chars = document.createElement('p');
     chars.className = 'sc-view-chars';
 
-    // Slider, in characters, on a range shared by every codec (2026-08-09,
-    // after reversing twice). Columns are a derived readout. Switching style
-    // holds the file size and changes the geometry, which is the property a
-    // user can be surprised by.
-    const range = sizeRange();
-    const sliderWrap = document.createElement('div');
-    sliderWrap.className = 'sc-slider';
-
-    const track = document.createElement('div');
-    track.className = 'sc-slider-ticks';
-    track.setAttribute('aria-hidden', 'true');
-    for (const tick of sliderTicks(range)) {
-      const pct = ((tick.chars - range.minChars) / (range.maxChars - range.minChars)) * 100;
-      const mark = document.createElement('span');
-      mark.className = tick.device ? 'sc-tick is-device' : 'sc-tick';
-      mark.style.left = `${pct}%`;
-      const text = document.createElement('span');
-      text.className = 'sc-tick-label';
-      text.textContent = tick.label;
-      mark.append(text);
-      track.append(mark);
-    }
-
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.className = 'sc-view-slider';
-    slider.min = String(range.minChars);
-    slider.max = String(range.maxChars);
-    slider.step = '1';
-    slider.setAttribute('aria-label', 'Message size in characters');
-    sliderWrap.append(slider, track);
-
-    // The carousel strip.
-    const strip = document.createElement('div');
-    strip.className = 'sc-strip';
-    strip.setAttribute('role', 'tablist');
-    strip.setAttribute('aria-label', 'Recent pictures');
-
     const status = document.createElement('p');
     status.className = 'app-status';
     status.setAttribute('role', 'status');
 
-    bottom.append(fit, chars, sliderWrap, strip, status);
+    // The size slider, which is app/sizeslider.js and no longer this file's.
+    // Mounted HERE, in the middle of assembling the band, through the host
+    // argument rather than appended afterwards: the band is a flex column and
+    // the order of these appends is the order of the rows. Readouts, slider,
+    // strip, status, which is the row order this band has always had. capture
+    // mounts the same component the same way.
+    //
+    // In characters, on a range shared by every codec (2026-08-09, after
+    // reversing twice). The columns above it are a derived readout: switching
+    // style holds the file size and changes the geometry, which is the property
+    // a user can be surprised by.
+    //
+    // This screen does NOT write sizeChars. The component does, and it is the
+    // only writer in the app; see state.js's owner table and the grep in
+    // test/planetext.test.js that keeps it true. What this screen contributes
+    // is setHidden() from render() and the two callbacks at the slider section
+    // below, both of which are function declarations so they can be named from
+    // up here.
+    bottom.append(fit, chars);
+    const sizeCtl = sizeSlider(bottom, {
+      store: state,
+      onInput: onSizeInput,
+      onSettle: onSizeSettle,
+      signal: ctx.signal,
+    });
+
+    // The carousel strip, which is app/thumbstrip.js and no longer this file's
+    // either. Built here for the same reason as the slider above it: the strip
+    // belongs between the slider and the status line. Everything it calls below
+    // -- say, show, render -- is a function declaration, so all three are
+    // defined long before a tap can reach them.
+    //
+    // It renders once now, against the placeholder message written into the
+    // live slot a few lines down, and once more at the end of mount once that
+    // slot holds the real encode. Both happen in this task, so the first
+    // render's thumbnail paints are cancelled before a frame ever runs them.
+    const strip = thumbStrip(bottom, {
+      state: () => ctx.state.get(),
+      selected: liveName,
+      pickVerb: 'Show',
+      say,
+      deleteHost: delSlot,
+      onPick: (_entry, i) => show(i),
+      onDelete: (entry, { index }) => {
+        say(`Deleted ${entry.name.split(' ')[0]}`);
+        const left = strip.entries();
+        // Deleting what you were looking at has to land somewhere. The
+        // neighbour, not the top: the user's attention is where the picture
+        // was.
+        //
+        // It landed on the top until 2026-08-09, and the comment saying
+        // otherwise was written against code that could not do it. The old
+        // renderStrip() recomputed `at` from the name of the entry being
+        // viewed, and the entry being viewed had just been deleted, so
+        // findIndex returned -1, Math.max(0, -1) made it 0, and every delete of
+        // the current picture jumped to the front of the strip. The component
+        // hands back the index the entry occupied, which is the number this
+        // always needed.
+        //
+        // The `wasSelected` branch that used to sit above this is gone with the
+        // corner delete. That control could remove an entry you were not
+        // looking at, so this had to repair `at` -- the slot the swipe counts
+        // from -- without changing the picture. One control that only ever acts
+        // on the current entry makes that unreachable, and show() below sets
+        // `at` itself.
+        if (!left.length) { clearSubject(); ctx.navigate('paste'); return; }
+        show(Math.min(index, left.length - 1));
+      },
+      signal: ctx.signal,
+    });
+    bottom.append(status);
     root.append(top, stage, bottom);
 
     // --- status ----------------------------------------------------------
@@ -256,20 +325,13 @@ export default register(defineScreen({
     // same three variables below, so `draw` and the save/share paths do not
     // branch on which one is on screen.
     //
-    // Order matters: the live subject is written into recents BEFORE the strip
-    // is built, so it occupies slot 0 and the strip's first thumbnail is the
-    // picture you are looking at. The strip would otherwise open scrolled to
-    // somebody else's photograph.
-    if (mine) {
-      // Encoded below; a placeholder now so the slot exists at index 0 and the
-      // strip does not reorder under the user on the first re-encode.
-      recents.add({ name: liveName, message: '\n', source: subject.source });
-    }
+    // The strip itself is app/thumbstrip.js and was built with the band above.
+    // What is left here is the half that is genuinely this screen's: which entry
+    // is on the stage, and what a swipe means.
 
-    let entries = recents.list();
-    // The live subject's slot. By name, because the message changes on every
-    // re-encode and the position must not.
-    let at = Math.max(0, entries.findIndex((e) => e.name === liveName));
+    // The slot the swipe counts from. The strip owns the list, so this is an
+    // index into strip.entries() and nothing else may hold one across a render.
+    let at = Math.max(0, recents.list().findIndex((e) => e.name === liveName));
 
     // What is currently on the stage.
     let encoded = null;
@@ -327,9 +389,15 @@ export default register(defineScreen({
       label.textContent = `${viewName} · ${viewSource}`;
       ctx.setTitle(viewName);
 
+      // Absent, not disabled, for a received message: it is already encoded and
+      // there is nothing left to choose. setHidden() puts the attribute on the
+      // wrapper and on the input, because those are two rules in
+      // sizeslider.css and a wrapper that collapses around a visible input is a
+      // control that half exists. This screen is the only caller: capture's
+      // slider is never hidden, because the viewfinder always has a size to
+      // choose.
       const sliderOn = mine && onLive;
-      slider.hidden = !sliderOn;
-      sliderWrap.hidden = !sliderOn;
+      sizeCtl.setHidden(!sliderOn);
 
       if (sliderOn) {
         const cols = currentCols(s);
@@ -341,18 +409,23 @@ export default register(defineScreen({
           : `${cols} columns · fits a phone`;
         fit.classList.toggle('is-warn', Boolean(warned));
         chars.textContent = `${(encoded ? encoded.stats.messageChars : s.sizeChars).toLocaleString()} characters`;
-        if (String(s.sizeChars) !== slider.value) slider.value = String(s.sizeChars);
+        // The thumb follows anything that moved sizeChars without going through
+        // the control: a mount that inherited a persisted value, or the other
+        // screen's slider between two visits. sync() is a no-op when they
+        // already agree, which is what makes it safe to call from render() on
+        // every settled drag.
+        sizeCtl.sync();
       } else {
         fit.textContent = `${geom ? geom.cols : 0} columns`;
         fit.classList.remove('is-warn');
         chars.textContent = `${viewSource} · ${message.length.toLocaleString()} characters`;
       }
 
-      for (const [i, b] of stripButtons) {
-        const on = i === at;
-        b.classList.toggle('is-on', on);
-        b.setAttribute('aria-selected', String(on));
-      }
+      // The underline only. Not a re-render, and not a scroll: this runs on
+      // every settled slider drag and on every style change, and a strip that
+      // repaints eight thumbnails or scrolls itself because the character count
+      // moved is a strip that twitches under your thumb.
+      strip.select(viewName);
     }
 
     // Decode warnings, which were computed and thrown away.
@@ -368,11 +441,16 @@ export default register(defineScreen({
       say(more > 0 ? `${first} (+${more} more)` : first, 'warn', { sticky: true });
     }
 
-    // Put entry `i` on the stage. `i === at` for the live subject restores the
-    // photo and the slider; anything else is a decoded message.
+    // Put entry `i` on the stage. The live subject restores the photo and the
+    // slider; anything else is a decoded message.
+    //
+    // The list is read out of the strip rather than out of recents, so the index
+    // this is handed is always an index into the eight thumbnails on screen. The
+    // other screen can rewrite the cache between a render and a tap.
     function show(i) {
-      if (i < 0 || i >= entries.length) return;
-      const entry = entries[i];
+      const list = strip.entries();
+      if (i < 0 || i >= list.length) return;
+      const entry = list[i];
       const live = entry.name === liveName;
 
       if (live && mine) {
@@ -401,155 +479,9 @@ export default register(defineScreen({
       announceWarnings();
       render();
       refit();
-      scrollStripTo(at);
-    }
-
-    // --- arming ----------------------------------------------------------
-    //
-    // Delete is two taps, the second on a different glyph, exactly as CLEAR ALL
-    // in settings.js is two taps on a different word. There is no undo, and
-    // these are the only destructive controls in the app.
-    //
-    // This is what pays for the 22px hit box in compose.css: the button is now
-    // small enough to miss, so it has to be harmless to hit. Missing it costs a
-    // tap; hitting it costs a tap.
-    //
-    // One armed control at a time, and it disarms on the next pointerdown that
-    // is not on it: selecting another thumbnail, swiping the picture, moving
-    // the slider, opening the save sheet. Capture phase on the screen root, so
-    // it runs before the click that acts on any of those. `contains` rather
-    // than `===`: the button holds one bare character today, and a tap on
-    // whatever it holds tomorrow is still a tap on the button.
-    //
-    // 3000ms is settings.js's window for the same decision. Two disarm timings
-    // for one idiom would be two idioms.
-    const ARM_MS = 3000;
-    let armedDel = null;
-    let armedName = '';
-    let armTimer = 0;
-
-    function disarm() {
-      clearTimeout(armTimer);
-      armTimer = 0;
-      if (!armedDel) return;
-      armedDel.dataset.armed = '';
-      armedDel.textContent = '×';
-      armedDel.setAttribute('aria-label', `Delete ${armedName}`);
-      armedDel = null;
-      armedName = '';
-    }
-
-    // The label changes with the glyph. A screen reader user gets no colour and
-    // no ✓, so without this the control announces itself as Delete twice and
-    // the second announcement is the one that fires.
-    function arm(del, name) {
-      disarm();
-      armedDel = del;
-      armedName = name;
-      del.dataset.armed = '1';
-      del.textContent = '✓';
-      del.setAttribute('aria-label', `Confirm deleting ${name}`);
-      armTimer = setTimeout(disarm, ARM_MS);
-    }
-
-    root.addEventListener('pointerdown', (e) => {
-      if (armedDel && !armedDel.contains(e.target)) disarm();
-    }, { signal: ctx.signal, capture: true });
-    ctx.signal.addEventListener('abort', () => clearTimeout(armTimer), { once: true });
-
-    // --- the strip -------------------------------------------------------
-    const stripButtons = new Map();
-
-    function scrollStripTo(i) {
-      const b = stripButtons.get(i);
-      if (b && b.scrollIntoView) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    }
-
-    function renderStrip() {
-      // Before replaceChildren(), because the button the arming state points at
-      // is about to stop existing and its timer would then disarm a detached
-      // node while the strip shows nothing armed.
-      disarm();
-      strip.replaceChildren();
-      stripButtons.clear();
-      entries = recents.list();
-      at = Math.max(0, entries.findIndex((e) => e.name === viewName));
-
-      entries.forEach((entry, i) => {
-        const item = document.createElement('div');
-        item.className = 'sc-strip-item';
-
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'sc-strip-thumb';
-        b.setAttribute('role', 'tab');
-        b.setAttribute('aria-label', `Show ${entry.name}`);
-        const box = document.createElement('span');
-        box.className = 'sc-strip-box';
-        const art = document.createElement('pre');
-        art.className = 'sc-strip-art';
-        art.setAttribute('aria-hidden', 'true');
-        box.append(art);
-        b.append(box);
-        b.addEventListener('click', () => show(i), { signal: ctx.signal });
-
-        // Per-entry delete, as its own control. A long-press is invisible, and
-        // this is the only destructive action in the app.
-        const del = document.createElement('button');
-        del.type = 'button';
-        del.className = 'sc-strip-del';
-        del.setAttribute('aria-label', `Delete ${entry.name}`);
-        del.textContent = '×';
-        del.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (del.dataset.armed !== '1') {
-            arm(del, entry.name);
-            // The status line says what one character cannot. It is transient
-            // at 2600ms against a 3000ms window, so it leaves fractionally
-            // early: the button is the state of record, the line is a caption
-            // on it.
-            say(`Tap again to delete ${entry.name.split(' ')[0]}`);
-            return;
-          }
-          disarm();
-          const wasViewing = entry.name === viewName;
-          recents.remove(entry.name);
-          say(`Deleted ${entry.name.split(' ')[0]}`);
-          renderStrip();
-          // Deleting what you were looking at has to land somewhere. The
-          // neighbour, not the top: the user's attention is where the picture
-          // was.
-          if (wasViewing) {
-            const next = recents.list();
-            if (!next.length) { clearSubject(); ctx.navigate('paste'); return; }
-            show(Math.min(at, next.length - 1));
-          } else {
-            render();
-          }
-        }, { signal: ctx.signal });
-
-        item.append(b, del);
-        strip.append(item);
-        stripButtons.set(i, b);
-
-        // Draw after layout, so the box has a measured size to fit into.
-        requestAnimationFrame(() => {
-          // The live slot holds a placeholder until the first encode lands.
-          const text = entry.name === liveName && message ? message : entry.message;
-          paintThumb(art, text, box, ctx.state.get());
-        });
-      });
-
-      // The cap, said out loud. Empty until it is in sight. See recents.js for
-      // why delete makes this mandatory rather than nice to have.
-      const note = recents.capNote(entries.length);
-      if (note) {
-        const cap = document.createElement('p');
-        cap.className = 'sc-strip-cap';
-        cap.textContent = note;
-        strip.append(cap);
-      }
-      render();
+      // The one place the strip is asked to scroll: the picture just changed, so
+      // the thumbnail that says which one it is has to be in sight.
+      strip.select(viewName, { scroll: true });
     }
 
     // --- swipe -----------------------------------------------------------
@@ -585,22 +517,47 @@ export default register(defineScreen({
     stage.addEventListener('pointerleave', endSwipe, { signal: ctx.signal });
 
     // --- slider ----------------------------------------------------------
+    //
+    // The control is mounted with the band above, the same way capture mounts
+    // it. These are the two callbacks it was handed, written as function
+    // declarations so the mount can name them from further up the file. Neither
+    // can run before mount() returns -- they only fire on a pointer -- which is
+    // what makes it safe for the rAF handle below to be declared down here with
+    // the code that uses it.
+    //
     // rAF-coalesced, because a range input fires on every pixel of a drag and
-    // an encode is not free. The store is written on every input so nothing
-    // desynchronises; only the expensive part is throttled.
+    // an encode is not free. The store is written on every input, by the
+    // component, so nothing desynchronises; only the expensive part is
+    // throttled, and it is throttled HERE rather than inside the component.
+    // sizeslider.js says why at length: what is expensive differs per screen.
+    // This screen re-encodes a full-resolution still and re-fits a <pre>, which
+    // is the heaviest of the two paths, and capture -- which repaints a live
+    // viewfinder instead -- skips on the derived column count and repaints
+    // synchronously. A component that coalesced for both would be wrong for one
+    // of them.
+    //
+    // `cols` is in the payload and this screen does not read it, which is the
+    // one thing here worth flagging rather than defending. capture skips an
+    // input entirely when the derived column count has not moved, and the same
+    // skip would be sound in front of this rAF -- the encoder's output is a
+    // function of the column count alone -- so the coalescing would be doing
+    // nothing on ~99.6% of the events it currently absorbs. It is not done here
+    // because this rAF is the behaviour that shipped and the move to the
+    // component was not the change to alter it under. An open item, not a
+    // finding.
     let pending = 0;
-    slider.addEventListener('input', () => {
-      state.set({ sizeChars: Number(slider.value) });
+    function onSizeInput() {
       cancelAnimationFrame(pending);
       pending = requestAnimationFrame(() => { reencode(); render(); refit(); });
-    }, { signal: ctx.signal });
+    }
     // The recents entry follows the picture, but only once the drag has
-    // settled. update() rather than add(): add() de-duplicates by message, so
-    // re-adding after every re-encode would fill all eight slots with the same
-    // photograph at eight sizes.
-    slider.addEventListener('change', () => {
+    // settled, which is what `change` means and why the component exposes it
+    // separately. update() rather than add(): add() de-duplicates by message,
+    // so re-adding after every re-encode would fill all eight slots with the
+    // same photograph at eight sizes.
+    function onSizeSettle() {
       if (mine && onLive && message) recents.update(liveName, message);
-    }, { signal: ctx.signal });
+    }
     ctx.signal.addEventListener('abort', () => cancelAnimationFrame(pending), { once: true });
 
     state.subscribe((_s, changed) => {
@@ -833,7 +790,11 @@ export default register(defineScreen({
     // is how the recorded contradictions in this project started.
     if (mine && message) recents.update(liveName, message);
 
-    renderStrip();
+    // The strip's second and final render of the mount, and the reason it is
+    // ordered after the line above: the live slot held '\n' until then, and a
+    // thumbnail cannot be painted from a placeholder. The first render's paints
+    // are cancelled by this one before a frame runs them, so this costs nothing.
+    strip.render({ selected: viewName });
     announceWarnings();
     render();
     refit();

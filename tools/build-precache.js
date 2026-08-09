@@ -128,6 +128,57 @@ ${files.map((f) => `  '${f}',`).join('\n')}
 `;
 }
 
+// The line in sw.js that this script owns. Matched loosely enough to find a
+// stamp from any previous build, and anchored to the start of a line so it
+// cannot match the prose above it.
+const STAMP_RE = /^\/\/ @build .*$/m;
+const stampFor = (version) => `// @build ${version}`;
+
+// STAMP THE VERSION INTO sw.js. Added 2026-08-09.
+//
+// The browser decides whether a service worker has changed by refetching sw.js
+// and comparing bytes. sw.js is static: the version, and the whole file list,
+// live in app/precache-manifest.classic.js, which sw.js pulls in with
+// importScripts(). So every build of this app produced a byte-identical sw.js.
+//
+// The spec has said since 2019 that imported scripts are compared during an
+// update too, and current Chrome, Firefox and Safari do. That is the only
+// reason updates worked at all. It leaves the app's update path resting
+// entirely on the newer half of a two-part rule, on a device population that
+// includes old Android WebViews, for no reason -- the fix is one comment line
+// that changes with the build.
+//
+// Reported symptom that led here: a deployed build would not reach a phone.
+// The primary cause was elsewhere (updateViaCache, and nothing ever calling
+// registration.update(); see app/offline.js). This is the belt to that
+// braces, and it makes the byte comparison say what it means.
+//
+// sw.js stays out of EXCLUDE's precache list and out of the version hash. It is
+// never cached by the app -- a worker that caches itself fights the browser's
+// update check -- and hashing a file this script writes into would not
+// converge.
+function stampWorker(version) {
+  const out = path.join(ROOT, 'sw.js');
+  if (!existsSync(out)) return false;
+  const before = readFileSync(out, 'utf8');
+  const stamp = stampFor(version);
+  if (STAMP_RE.test(before)) {
+    const after = before.replace(STAMP_RE, stamp);
+    if (after === before) return false;
+    writeFileSync(out, after);
+    return true;
+  }
+  // First run, or someone removed the line. It goes directly under the
+  // /* eslint-env */ pragma, above importScripts, so it is the first thing read
+  // after the header and cannot be mistaken for part of the prose.
+  const anchor = "importScripts('app/precache-manifest.classic.js');";
+  if (!before.includes(anchor)) {
+    throw new Error('sw.js: cannot find the importScripts line to stamp the build version above');
+  }
+  writeFileSync(out, before.replace(anchor, `${stamp}\n\n${anchor}`));
+  return true;
+}
+
 export function writeManifest() {
   const { source, sourceClassic, files, version } = buildManifest();
   let changed = false;
@@ -136,8 +187,13 @@ export function writeManifest() {
     const before = existsSync(out) ? readFileSync(out, 'utf8') : null;
     if (before !== text) { writeFileSync(out, text); changed = true; }
   }
+  if (stampWorker(version)) changed = true;
   return { files, version, changed };
 }
+
+// So a test can assert sw.js carries the version this build would produce,
+// rather than reimplementing the format and drifting from it.
+export { stampFor as buildStamp };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { files, version, changed } = writeManifest();

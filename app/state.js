@@ -9,7 +9,7 @@
 //  styleId         string                     DEFAULT_STYLE 'art'  capture
 //  facing          'environment' | 'user'     'environment'        capture
 //  customCharsets  [{ id, name, ramp }]       []                   settings/charsets
-//  sizeChars       int, CHARACTERS            sizeRange().default  compose
+//  sizeChars       int, CHARACTERS            sizeRange().default  app/sizeslider.js
 //  capture         { source, width, height,   null                 capture
 //                    takenAt } | null
 //  encoded         encode() result | null     null                 compose
@@ -47,6 +47,34 @@
 // two-owner field and this table wrong. Or route imports through capture so the
 // moment exists. The second was taken, as a frozen sub-mode in capture.js, and
 // styleId still has one owner.
+//
+// ONE ROW OF THIS TABLE NAMES A MODULE RATHER THAN A SCREEN. 2026-08-09.
+//
+// sizeChars' owner was `compose`, on the same reasoning styleId's is `capture`:
+// the size was chosen after the shot, so the composer chose it. The owner
+// reversed that -- "be able to edit the line count in the live viewfinder, not
+// just after the image was taken" -- and asked for the control on BOTH screens.
+//
+// That is a two-writer field, which is the problem styleId had, and the rule
+// above is that it gets repaired rather than accepted. styleId's repair was to
+// make the missing moment exist so the field kept one writer. There is no
+// equivalent here: two screens genuinely do choose the size now, by
+// instruction, and no amount of routing makes that one screen.
+//
+// So the repair is applied one level down. The control is a component,
+// app/sizeslider.js, and the component is the only thing in the app that writes
+// this field. Both screens mount it and neither sets it. The owner column names
+// the writer, so the writer is what it names -- and unlike a prose convention
+// this is greppable, which is how a test pins it.
+//
+// This row carried a caveat until the migration finished, and the caveat is
+// gone because the exception is: compose.js built its own slider inline and set
+// sizeChars itself, which made the row a statement of where the write BELONGED
+// rather than of where it was. That control, its DEVICE_MARKERS and its
+// sliderTicks were deleted on 2026-08-09 and it mounts the component like
+// capture does, so there is no direct write left anywhere. The test that greps
+// for one now greps BOTH picture screens, which is what turns this row from a
+// prose convention into something that fails when it stops being true.
 //
 // The consequence: capture and compose now share a stage geometry (shell.css
 // .app-frame) and differ only in their chrome bands, so they read as one screen

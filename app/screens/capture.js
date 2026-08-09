@@ -89,6 +89,7 @@ import { startViewfinder } from '../viewfinder.js';
 import { clearAtlasCache } from '../atlas.js';
 import { setSubject, getSubject, clearSubject } from '../pipeline.js';
 import { attachStyleGesture, cycleStyle } from '../stylegesture.js';
+import { sizeSlider } from '../sizeslider.js';
 
 // Whether the clipboard is holding one of our messages, which is what puts the
 // gold dot on OPEN.
@@ -207,13 +208,26 @@ export default register(defineScreen({
     // on compose.
     const stage = document.createElement('div');
     stage.className = 'app-stage sc-stage';
-    const canvas = document.createElement('canvas');
-    canvas.className = 'sc-art';
-    // The art is a picture, not text to be read out cell by cell. Same
-    // treatment the wrapper gives it, and the same reason a canvas gets a role
-    // at all: without one it is an unlabelled graphic.
-    canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', importing ? 'Selected photo' : 'Live preview');
+
+    // ONE CANVAS ELEMENT PER VIEWFINDER. Built through a factory for that
+    // reason, and only that reason. See startSource() and the contract note at
+    // the top of viewfinder.js: a canvas can never change context type, and
+    // viewfinder.stop() ends by asking the driver to drop the WebGL context, so
+    // an element that has carried one viewfinder cannot carry another. Handing
+    // the same element to a second startViewfinder() is what made the flip
+    // hang. `canvas` is therefore a `let`, and everything that touches it --
+    // showNotice, hideNotice -- reads it at call time.
+    function makeArtCanvas() {
+      const c = document.createElement('canvas');
+      c.className = 'sc-art';
+      // The art is a picture, not text to be read out cell by cell. Same
+      // treatment the wrapper gives it, and the same reason a canvas gets a
+      // role at all: without one it is an unlabelled graphic.
+      c.setAttribute('role', 'img');
+      c.setAttribute('aria-label', importing ? 'Selected photo' : 'Live preview');
+      return c;
+    }
+    let canvas = makeArtCanvas();
     stage.append(canvas);
 
     // Shown instead of the canvas when there is no camera to show.
@@ -226,10 +240,14 @@ export default register(defineScreen({
     const bottom = document.createElement('div');
     bottom.className = 'app-chrome-bot sc-bottom';
 
-    // Secondary by construction (spec 5.2): the character count is information,
-    // not a control, and there is no slider on this screen to act on it with.
-    // It stays because it is the one number that tells you whether the message
-    // is going to be enormous before you take it.
+    // Secondary by construction (spec 5.2): the character count is information
+    // and the slider below it is the control. It stays because it is the one
+    // number that tells you whether the message is going to be enormous before
+    // you take it, and because it is what tells you what the slider just did.
+    //
+    // It used to say "and there is no slider on this screen to act on it with",
+    // which was true until the size control landed here on 2026-08-09. The
+    // owner asked for both: the readout AND the slider, in this band.
     const readout = document.createElement('p');
     readout.className = 'sc-readout';
 
@@ -239,7 +257,42 @@ export default register(defineScreen({
     status.className = 'app-status';
     status.setAttribute('role', 'status');
 
-    bottom.append(readout, status);
+    // THE SIZE SLIDER, IN THE LIVE VIEWFINDER. Added 2026-08-09.
+    //
+    // The owner: "be able to edit the line count in the live viewfinder, not
+    // just after the image was taken." This file's own header has argued since
+    // the viewfinder went live that "WYSIWYG here covers size as well as
+    // style", and the size was the one thing you could not choose while
+    // looking through it -- you framed at whatever grid compose had last been
+    // left on, took the shot, and only then found out it was 65 columns.
+    //
+    // It is app/sizeslider.js rather than a second copy of compose's control.
+    // See that file's header for the two range-input rules that are invisible
+    // when broken, and for the sizeChars ownership question -- the short of it
+    // is that this screen does NOT write sizeChars; the component does, and it
+    // is the only writer.
+    //
+    // The band has room and --pt-chrome-bot is NOT changing for this: it is the
+    // most defended number in the codebase, every picture screen is laid out
+    // against it, and capture's band was 52 of its 176 pixels. The slider takes
+    // it to 100. The arithmetic is written out in app/screens/capture.css.
+    //
+    // Repaint policy is at onSizeInput() below, and it is the part that needed
+    // measuring rather than deciding.
+    //
+    // Built HERE, in the middle of assembling the band, and mounted through the
+    // host argument rather than appended afterwards: this is a flex column and
+    // the order of these appends is the order of the rows. The readout
+    // describes the picture, so the control that changes it goes under the
+    // readout rather than between it and the picture. compose.js builds its
+    // strip the same way and for the same reason.
+    bottom.append(readout);
+    sizeSlider(bottom, {
+      store: state,
+      onInput: onSizeInput,
+      signal: ctx.signal,
+    });
+    bottom.append(status);
 
     root.append(top, stage, bottom);
 
@@ -359,6 +412,76 @@ export default register(defineScreen({
       }
     }
 
+    // The column count the picture on screen was last painted FOR.
+    //
+    // currentCols(), never the viewfinder's `shot.cols`. Those two are the same
+    // number on every rung but the bottom two, where the degradation ladder
+    // scales the preview grid (colScale 0.66), and comparing across them would
+    // be comparing two different questions -- "what will be sent" against "what
+    // is being drawn". The slider decides the first.
+    let paintedCols = 0;
+
+    // Force a frame now, outside the rAF gate, and take the readout from it.
+    function repaint() {
+      paintedCols = currentCols(state.get());
+      const shot = vf ? vf.refresh() : null;
+      render(shot ? { result: shot.result, cols: shot.cols } : null);
+      return shot;
+    }
+
+    // --- the slider's repaint policy -------------------------------------
+    //
+    // MEASURED, because the obvious implementations are both wrong and the
+    // wrong one is wrong in a way that punishes the user for dragging.
+    //
+    // What a range input does during a drag: one `input` event per pixel of
+    // travel, which on a 390px phone at 120Hz touch sampling is a few hundred
+    // events per second. Each one was, until this function existed, a
+    // state.set() that woke the subscribe() handler below and called
+    // vf.refresh(), which is a full encode.
+    //
+    // What a full encode costs, measured on this machine with src/encode.js on
+    // the buffer sizes app/camera.js actually hands it (Node, desktop; a phone
+    // is several times worse):
+    //
+    //   ramp     65 cols  130x174 buffer   3.0 ms
+    //   ramp     98 cols  196x262 buffer   5.8 ms
+    //   ramp    130 cols  260x346 buffer   9.9 ms
+    //   braille 130 cols  260x348 buffer   7.5 ms
+    //
+    // And every distinct column count is a distinct fitFontSize(), so it is
+    // also a distinct atlas: app/atlas.js's cache holds FOUR entries, so a drag
+    // evicts and rebuilds continuously on top of the encode.
+    //
+    // The cheap fix that does not work: coalesce to one repaint per rAF. That
+    // is 60 encodes a second on top of the viewfinder's own 20, on a screen
+    // whose frame budget is 45ms and whose degradation ladder steps DOWN after
+    // sustained overrun -- so a long drag would coarsen the picture, and the
+    // user would have made it worse by adjusting it.
+    //
+    // The fix that does work is to notice how few of those events mean
+    // anything. The track is 5,742 to 22,663 characters, so 16,921 one-step
+    // positions, and colsForChars() maps them onto 66 distinct ramp column
+    // counts. Everything the encoder produces -- cols, rows, and messageChars,
+    // which is cells + rows + WRAPPER_BUDGET -- is a function of that column
+    // count alone. So for ~99.6% of the values the thumb can take, re-encoding
+    // is provably re-encoding for a bit-identical answer, and skipping them is
+    // not an approximation.
+    //
+    // Net: a fast full-track drag falls from ~390 encodes to 66, a slow one
+    // within a single grid to zero, and the 66 that remain repaint immediately,
+    // synchronously, on the input event -- not on the next rAF and not on the
+    // loop's next tick. Which is the behaviour the old subscribe() path had and
+    // the reason it is worth keeping.
+    //
+    // The readout follows the same rule, and that is correct rather than a
+    // compromise: it names the message the shutter would send, and inside one
+    // grid that message does not change.
+    function onSizeInput({ cols }) {
+      if (cols === paintedCols) return;
+      repaint();
+    }
+
     // One path for both modes. The still camera's grabStill() returns the
     // imported buffer; the live one takes a fresh full-resolution read.
     async function commit() {
@@ -367,6 +490,24 @@ export default register(defineScreen({
       // encode() on the compose side fits the aspect with a focus point and
       // measures this image's own tone endpoints, not the preview's smoothed
       // ones. Spec 5.8.
+      //
+      // THE FRONT CAMERA'S PICTURE FLIPS HERE, AND IT IS SUPPOSED TO. Changed
+      // 2026-08-09, second pass, on the repo owner's instruction to match other
+      // camera apps.
+      //
+      // The viewfinder above is MIRRORED on the front camera, the way a phone's
+      // is, so the user frames themselves in a mirror. grabStill() is NOT
+      // mirrored, because a photograph is true to the lens. So the still that
+      // goes into the pipeline on the next line is the left-right reverse of
+      // the art that was on screen a moment ago, compose renders it that way,
+      // and for a selfie with lettering in it that is a visible flip across one
+      // navigation.
+      //
+      // It is not hidden and must not be. There is exactly one place in this
+      // app that decides mirroring -- drawDown() in app/camera.js, where the
+      // whole argument is written out -- and a second transform here, or on
+      // compose, to make the two agree again is the mistake this note exists to
+      // stop. If the flip is ever considered a bug, it is fixed there.
       const photo = camera.grabStill();
       if (!photo) return;
 
@@ -488,9 +629,40 @@ export default register(defineScreen({
       // Whatever is running now stops first. Order matters: the viewfinder
       // reads frames off the camera, so stopping it second would leave a rAF
       // loop grabbing from a stopped track for one frame.
-      if (vf) { vf.stop(); vf = null; }
+      //
+      // The surface is read back off the viewfinder before it is dropped,
+      // because it is not necessarily the element this closure last created: a
+      // lost GL context is recovered inside viewfinder.js by putting a fresh
+      // canvas in the old one's place, and the old one is then detached, where
+      // replaceWith() below would be a silent no-op and the stage would end up
+      // with two canvases or none.
+      if (vf) { canvas = vf.canvas; vf.stop(); vf = null; }
       if (camera) { camera.stop(); camera = null; }
       cameraError = null;
+
+      // A FRESH CANVAS FOR EVERY SOURCE. This is the fix for the flip hang.
+      //
+      // viewfinder.stop() disposes its WebGL renderer, and disposal ends with
+      // WEBGL_lose_context.loseContext() so the GPU gets its context back now
+      // rather than at GC time. getContext() hands back the SAME context object
+      // for an element that already has one, and a context lost that way never
+      // comes back -- so the second startViewfinder() on this element got a
+      // dead context, failed to compile a shader, fell through to the 2D path,
+      // and got null from getContext('2d'), because an element that holds a
+      // WebGL context cannot also hold a 2D one. The next line threw out of the
+      // constructor and out of this function's await, and the screen was left
+      // with vf === null: no loop, no repaint, the last frame the dead context
+      // painted still on screen. Navigating away and back "fixed" it because a
+      // fresh mount builds a fresh element.
+      //
+      // Rebuilt unconditionally, including on the first call, where it throws
+      // away the element the stage was built with. That element has never held
+      // a context, so it costs one createElement; one code path is worth more
+      // than saving it, and the alternative is a "has this been used yet" flag
+      // whose only job is to be wrong once.
+      const fresh = makeArtCanvas();
+      canvas.replaceWith(fresh);
+      canvas = fresh;
 
       if (importing) {
         try {
@@ -547,6 +719,13 @@ export default register(defineScreen({
         onStats: (stats) => render(stats),
       });
 
+      // startViewfinder is allowed to swap its own surface during construction
+      // -- the net in useCanvas2d() does exactly that -- so take the answer
+      // from it rather than assuming `fresh` survived. showNotice() and
+      // hideNotice() toggle `canvas.hidden`, and toggling it on a detached
+      // element is a control that silently does nothing.
+      canvas = vf.canvas;
+
       // A still does not loop. Without this the ladder reports "coarse" about
       // a picture that never moved, and the app re-encodes it 20 times a
       // second. See viewfinder.freeze().
@@ -558,8 +737,18 @@ export default register(defineScreen({
       // own, and a flip has to repaint from the new stream's first frame.
       const r = stage.getBoundingClientRect();
       if (r.width > 0 && r.height > 0) publish(r.width, r.height);
-      const shot = vf.refresh();
-      if (importing && shot) render({ result: shot.result, cols: shot.cols });
+      // Through repaint() rather than a bare vf.refresh(), so `paintedCols` is
+      // seeded from the source that is actually on screen. Left at 0 the first
+      // slider input would always be treated as a change, which is harmless,
+      // but a flip or a retry mid-drag would leave it describing the previous
+      // stream's grid, which is not.
+      //
+      // It renders on the live path too now, where the old bare refresh only
+      // rendered for an import. That is one readout write on the first frame of
+      // a new source instead of waiting up to 50ms for the loop's onStats, and
+      // it is the difference between a flip landing with the numbers already
+      // right and landing with the previous camera's.
+      repaint();
 
       offerFlip();
     }
@@ -581,16 +770,23 @@ export default register(defineScreen({
       },
     });
 
-    // sizeChars is compose's field, read here so the readout agrees with what
-    // compose will produce. A number that changes on navigation reads as a bug.
-    //
     // The loop would pick these up next frame; refresh() makes a style tap
     // repaint on the tap, and is the only thing that updates the static and
     // frozen rungs.
+    //
+    // sizeChars is NOT in this list any more, and that is the whole of the
+    // drag-smoothness fix. It was, back when this screen only READ the field so
+    // that its readout agreed with what compose would produce. Now the slider
+    // in the band below writes it, so every input event during a drag would
+    // arrive here and force a full encode -- see onSizeInput(), which is that
+    // path, deduplicated. Leaving it here as well would be two routes to one
+    // repaint, and the undeduplicated one would win.
+    //
+    // Nothing else writes sizeChars while this screen is mounted -- compose is
+    // not mounted, and settings does not touch it -- so nothing is lost.
     state.subscribe((_s, changed) => {
-      if (changed.has('styleId') || changed.has('sizeChars') || changed.has('customCharsets') || changed.has('invert')) {
-        const shot = vf ? vf.refresh() : null;
-        render(shot ? { result: shot.result, cols: shot.cols } : null);
+      if (changed.has('styleId') || changed.has('customCharsets') || changed.has('invert')) {
+        repaint();
       }
     }, { signal: ctx.signal });
 
@@ -622,8 +818,30 @@ export default register(defineScreen({
       const next = state.get().facing === 'user' ? 'environment' : 'user';
       state.set({ facing: next });
       flipLabel();
+
+      // Said BEFORE the await, not only after it, because the await is the
+      // part that takes time and the stage is blank for the whole of it. The
+      // old stream's track is stopped before the new getUserMedia is even
+      // issued -- it has to be, or the second request hits a busy sensor and
+      // throws NotReadableError -- so there is nothing to show in between, and
+      // on a phone the reacquire is comfortably long enough to read as a crash.
+      //
+      // Sentence case, not the uppercase the two camera names use. Uppercase in
+      // this slot echoes a NAME -- the style, the camera you landed on, the same
+      // convention the style gesture follows -- and this is a report on
+      // progress, which is compose.js's 'Rendering PNG…' shape.
+      say('Switching camera…');
       try {
         await startSource();
+      } catch (err) {
+        // startSource() classifies every camera failure into a notice and
+        // returns, so reaching here means something else broke. Report it on
+        // screen rather than as an unhandled rejection from a click handler:
+        // the failure mode this whole change exists to remove is a flip that
+        // leaves the screen dead and says nothing.
+        console.error('capture: flip failed', err);
+        say('The camera did not restart.', 'error');
+        return;
       } finally {
         flip.disabled = false;
       }
@@ -631,7 +849,15 @@ export default register(defineScreen({
       // Named out loud, like the style gesture does. The picture changing is
       // the real feedback, but a front camera pointed at a ceiling looks a lot
       // like a rear camera that failed to start.
-      say(next === 'user' ? 'FRONT CAMERA' : 'REAR CAMERA');
+      //
+      // `camera.live` is false when the sensor has been handed back but is not
+      // producing frames yet -- see waitForFrame() in camera.js, which gives up
+      // after a second and returns the camera anyway. That is not an error and
+      // needs no retry: the viewfinder's loop is already running and paints the
+      // first frame that arrives (see the null-frame note in its tick()). It
+      // does need saying, because until then the stage is blank.
+      if (camera && !camera.live) say('Waiting for the camera…');
+      else say(next === 'user' ? 'FRONT CAMERA' : 'REAR CAMERA');
     }, { signal: ctx.signal });
 
     render(null);

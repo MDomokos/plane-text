@@ -16,6 +16,8 @@
 
 /* eslint-env serviceworker */
 
+// @build pt-53915b62074e
+
 importScripts('app/precache-manifest.classic.js');
 
 // The cache name is the version. build-precache.js hashes file contents, so a

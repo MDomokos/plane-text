@@ -1,0 +1,345 @@
+/* Plane Text: the recents strip. See thumbstrip.js for what the component owns.
+ *
+ * ===========================================================================
+ * WHERE IT SITS, AND WHY THAT IS ONE DECLARATION.
+ *
+ * `margin-top: auto` on .pt-strip. Both screens put the strip in a flex column,
+ * so an auto top margin eats the column's free space and pins the strip to the
+ * bottom of it. Neither screen names an offset, which is what stops the two
+ * from drifting apart the way the two strips did.
+ *
+ * It also fixes a case inside the viewer that had nothing to do with the other
+ * screen. .app-chrome-bot is `justify-content: flex-start`, and the size slider
+ * is ABSENT rather than disabled for a received message (compose.js: there is
+ * nothing to decide about a message that is already encoded). So the strip and
+ * the status line were dragged 48px up the band -- the slider's 44 plus a 4px
+ * gap -- the moment you swiped from your own photo onto someone else's. The
+ * strip moved between two pictures on the same screen.
+ *
+ * ===========================================================================
+ * THE HEIGHT BUDGET, AND WHY THE NAME IS INSIDE THE CARD.
+ *
+ * The name plate is the one thing here that looks arbitrary and is not. The
+ * viewer's band is --pt-chrome-bot, a fixed 176px reserved so the picture does
+ * not move (tokens.css), and it was already full. Measured, top to bottom:
+ *
+ *   band padding-top    4
+ *   .sc-view-fit       21   (--pt-size-sm 14 x line-height 1.5)
+ *   gap                 4
+ *   .sc-view-chars     18
+ *   gap                 4
+ *   .pt-slider         44   (--pt-tap; the hit area IS the control)
+ *   gap                 4
+ *   .pt-strip          51
+ *   gap                 4
+ *   .app-status        18
+ *                     ---
+ *                     172 of 176
+ *
+ * A caption BELOW a 48px card costs 15px (2 margin + 12 line + 1 for the
+ * underline's clearance) and there are 4 spare, so the card would have had to
+ * come down to 36 tall and, at 3:4, to 27 wide. That is smaller than either
+ * strip has ever drawn.
+ *
+ * (The original version of this paragraph had a second reason: 27 wide re-opened
+ * the hit-box bug the corner delete button was shaped around. That control is
+ * gone as of 2026-08-09 -- see the delete section below -- so the argument is
+ * down to one reason. It is still the reason.)
+ *
+ * So the name is inside the card and the ART gives up the rows instead:
+ *
+ *   .pt-thumb-card     48 = .pt-thumb-box 35 + 1px divider + .pt-thumb-name 12
+ *   .pt-thumb          51 = card 48 + 2px padding + 1px underline
+ *
+ * The visible picture ends up the same size either way -- a 3:4 grid in a 36x35
+ * box draws 26x35, and in a 27x36 box it draws 27x36 -- so the choice costs the
+ * art nothing and buys back the 36px tap target, the 3:4 outer card, and
+ * --pt-thumb-w / --pt-thumb-h at the values tokens.css already argued for.
+ *
+ * The 4px of slack is the scrollbar's. On a platform with overlay scrollbars
+ * (every phone, and macOS by default) the bar takes no layout space at all. On
+ * a classic-scrollbar desktop the strip's used height grows by the bar, which
+ * is why the bar below is 2px rather than the 6px it replaces. Firefox's
+ * `scrollbar-width: thin` is wider than either and the band clips the last few
+ * pixels of the underline there. That is unchanged in kind from the 6px bar and
+ * it is the reason 2px is a ceiling rather than a preference.
+ * ========================================================================== */
+
+.pt-strip {
+  flex: none;
+  margin-top: auto;   /* see the top of this file. Load-bearing. */
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pt-space-2);
+
+  /* Clamp to the picture, not the window, exactly as .pt-actionbar does. On
+   * `open` there is no stage, and --pt-art-w carries over from whatever the
+   * picture screens last reserved, which is what makes the two line up. */
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin-inline: auto;
+
+  /* The strip's own gutter, and it is --pt-space-4 because that is the gutter
+   * .app-screen gives every non-picture screen. The viewer's band has no
+   * padding of its own, so without this the first thumbnail is flush against
+   * the frame edge and the last one's delete button hangs off it. `open`
+   * cancels its screen gutter for this element so the two agree; see
+   * paste.css. */
+  padding-inline: var(--pt-space-4);
+  overflow-x: auto;
+
+  /* ------------------------------------------------------------------------
+   * THE SCROLLBAR. Retuned 2026-08-09, from a 6px gold bar to a hairline.
+   *
+   * It was maybe-rain's signature scrollbar: 6px, an --pt-accent thumb, a 2px
+   * border in the background colour with background-clip: padding-box to make
+   * it read as a thin gold line. The comment that introduced it is right about
+   * one thing and this keeps it: the strip before that hid its scrollbar with
+   * `display: none`, and on a desktop that is a lost affordance, since a row of
+   * eight thumbnails that scrolls does not say so.
+   *
+   * What it was wrong about is the colour, and this is a standing violation of
+   * the app's own most-stated rule, quoted from tokens.css:
+   *
+   *     One accent, used once per view ... If two things on a screen are gold,
+   *     one of them is wrong.
+   *
+   * On the viewer, the gold selection underline and a gold scrollbar were both
+   * on screen at once, four pixels apart, on the same control. The underline is
+   * the one that means something -- it says which of eight pictures you are
+   * looking at -- so the scrollbar is the one that was wrong.
+   *
+   * It moves to the hairline vocabulary, which is what every other structural
+   * rule in the app draws from: --pt-divider for the trough, since it is a
+   * groove rather than an object, and --pt-line-strong for the thumb, since it
+   * is the one part you can grab. No radius, for the reason the slider track
+   * gives in sizeslider.css: a 2px rule with a radius is a 2px rule.
+   * --------------------------------------------------------------------- */
+  scrollbar-width: thin;
+  scrollbar-color: var(--pt-line-strong) transparent;
+}
+.pt-strip::-webkit-scrollbar { height: 2px; }
+.pt-strip::-webkit-scrollbar-track { background: var(--pt-divider); }
+.pt-strip::-webkit-scrollbar-thumb { background: var(--pt-line-strong); border-radius: 0; }
+
+/* The empty state is a paragraph, not a row, so the strip stops being a
+ * scroller for as long as it has nothing to scroll. Without this the copy is
+ * laid out as a single flex item on one line and clipped at the frame edge. */
+.pt-strip.is-empty {
+  display: block;
+  overflow: visible;
+}
+
+/* The thumbnail ------------------------------------------------------------ */
+
+/* A direct child of the strip. There was a `.pt-strip-item` wrapper here, whose
+ * only declarations were `position: relative` and `flex: none`, and the relative
+ * position existed solely to anchor the absolutely positioned corner delete
+ * button. With that button gone the wrapper had one job left, which the button
+ * can do itself. */
+.pt-thumb {
+  flex: none;
+  display: block;
+  width: var(--pt-thumb-w);
+  padding: 0 0 2px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;   /* single-sided border, so no radius */
+  color: var(--pt-ink-faint);
+  font-family: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* The gold underline, the universal selection idiom in this system. The same
+ * mark the style row uses, for the same reason: it says "this one" without
+ * introducing a second shape.
+ *
+ * Rendered on both screens and lit only where something is current. `open` has
+ * no current entry, so nothing there is ever gold -- which is the correct
+ * outcome and not a missing feature: that screen's one accent is the hero PASTE
+ * button in the action bar. */
+.pt-thumb.is-on { border-bottom-color: var(--pt-accent); }
+
+/* The card is the whole object: picture, divider, name. One hairline around all
+ * three, so a thumbnail is one thing rather than a picture with a caption
+ * floating under it. See the height arithmetic at the top of this file for why
+ * the name is inside rather than below. */
+.pt-thumb-card {
+  display: flex;
+  flex-direction: column;
+  height: var(--pt-thumb-h);
+  overflow: hidden;
+  border-radius: var(--pt-radius);
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  background: var(--pt-art-bg);
+}
+
+/* The art's box, and what paintThumb() measures. Centring is new and it is a
+ * fix rather than a flourish: the box is no longer 3:4, and it never was for a
+ * received message whose grid is some other shape, so a <pre> at width:
+ * max-content sat flush left with the leftover black to its right. */
+.pt-thumb-box {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.pt-thumb-art {
+  margin: 0;
+  white-space: pre;
+  font-family: var(--pt-mono);
+  color: var(--pt-art-ink);
+  font-kerning: none;
+  font-variant-ligatures: none;
+}
+
+/* The name identifies; the picture does not. At --pt-thumb-w a grid of ramp
+ * glyphs reads as texture (recents.js has always said so), and this label is
+ * how you know which entry it is.
+ *
+ * --pt-size-2xs exists for this and nothing else. It was `font-size: 10px`, the
+ * only off-scale size in the app, and it is deliberate rather than a mistake: a
+ * card this size cannot carry 12px type, so it became a token instead of being
+ * rounded up into one that does not fit.
+ *
+ * --pt-line-tight rather than the body's 1.5, which would make the plate 15px
+ * and put the budget above over 176. 1.2 is 12px, which clears the descenders
+ * in the word list. */
+.pt-thumb-name {
+  flex: none;
+  border-top: 1px solid var(--pt-divider);
+  font-size: var(--pt-size-2xs);
+  line-height: var(--pt-line-tight);
+  text-align: center;
+  color: var(--pt-ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Delete ------------------------------------------------------------------- */
+
+/* One of the two destructive controls in the app, and the only one that is not
+ * in settings.
+ *
+ * ===========================================================================
+ * WHAT THIS REPLACES, AND WHY NONE OF ITS ARITHMETIC IS KEPT.
+ *
+ * This was `.pt-thumb-del`: a 22 x 22 `×` hung off the top-right corner of every
+ * card, plus about fifty lines here justifying that size. The justification was
+ * real. The shipped bug was that the control's 44px hit box, made with
+ * `::before { inset: -11px }`, measured 25 of a 30px thumbnail's columns and ran
+ * 11px into the NEIGHBOUR's card, so a tap meant to select an old picture
+ * deleted it. Shrinking the target to exactly the visible button, hung into the
+ * strip's own 8px gap, was the fix, and it left a 22px control in an app whose
+ * actionbar.js throws rather than render a 43px slot. The comment ended by
+ * arguing that a destructive control is the one place a target you can miss
+ * costs less than a target you cannot.
+ *
+ * That argument was sound and it is now moot. The owner asked for "an actual
+ * delete button, not the corner dismiss method", and a labelled button in the
+ * chrome band has nothing to overlap and no reason to be small. So the whole
+ * sub-44px case is deleted rather than left lying: it described a control that
+ * no longer exists, and a live comment defending a dead trade is how a codebase
+ * ends up with two of everything.
+ *
+ * WHAT IS CARRIED OVER, unchanged in substance:
+ *
+ *   Visible rather than behind a long-press. A long-press is invisible and an
+ *   undo cache you cannot prune is not an undo cache.
+ *
+ *   Quiet until armed. Faint ink, no border, no fill. A red control sitting on
+ *   screen reads as a warning about the SCREEN rather than about the action,
+ *   which is the same sentence settings.css writes above CLEAR ALL.
+ *
+ *   It arms before it fires. That was never really payment for the small
+ *   target, though the old text framed it that way: there is no undo, so one
+ *   tap must not be able to lose a picture at any size.
+ *
+ * THE 88px WIDTH is `calc(var(--pt-tap) * 2)` and is a measurement rather than a
+ * round number. The button shares the top chrome band with the message name and
+ * is laid out in a fixed-width grid column (see .app-chrome-row in shell.css),
+ * because a control whose label changes length would otherwise shove the name
+ * sideways on the first tap -- and the point of that band is that nothing moves.
+ * Fixed means it has to hold the LONGER of the two labels: 'TAP AGAIN' is nine
+ * characters at --pt-size-xs, which at a 0.6 advance plus --pt-track is 9 x 8.2
+ * = 74px. 88 clears it; 66, one and a half taps, does not.
+ *
+ * The reserved gutter on the other side of the row is the same 88, so the name
+ * stays centred on the picture rather than on what is left over.
+ * ========================================================================== */
+.pt-del {
+  flex: none;
+  /* The floor the rest of the app is held to, met head-on this time. */
+  min-height: var(--pt-tap);
+  min-width: calc(var(--pt-tap) * 2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--pt-space-2);
+  background: none;
+  border: 0;
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-faint);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  /* box-shadow is in the list for the armed ring below: without it the ring
+   * snaps on while the ink warms over 200ms, which reads as two things happening
+   * rather than one state changing. */
+  transition: color var(--pt-dur-base) ease, box-shadow var(--pt-dur-base) ease;
+  touch-action: manipulation;
+}
+.pt-del:hover,
+.pt-del:focus-visible { color: var(--pt-ink-dim); }
+
+/* Hidden when nothing is selected: an empty gallery has nothing to delete, and
+ * the strip's own empty state already says so. */
+.pt-del[hidden] { display: none; }
+
+/* Armed: the next tap is the one that deletes. The same two declarations as
+ * .sc-set-btn.is-danger[data-armed="1"] in settings.css, because it is the same
+ * promise made by the same idiom.
+ *
+ * thumbstrip.js swaps the word with the attribute, DELETE to TAP AGAIN, exactly
+ * as settings.js swaps CLEAR ALL to TAP AGAIN TO CLEAR. Colour is not the
+ * signal here and must not be: it is the second signal after the word, for the
+ * same reason the accessible name is rewritten in the same breath. */
+.pt-del[data-armed="1"] {
+  box-shadow: inset 0 0 0 1px var(--pt-error);
+  color: var(--pt-error);
+}
+
+/* The cap note and the empty state ----------------------------------------- */
+
+/* The cap, said out loud, and only once it is in sight. See recents.capNote().
+ * Delete is what makes this mandatory: once there is a delete button the user
+ * believes this is storage, and silent eviction at eight entries is then data
+ * loss rather than an undo cache doing its job. */
+.pt-strip-cap {
+  flex: none;
+  align-self: center;
+  margin: 0 0 0 var(--pt-space-2);
+  font-size: var(--pt-size-2xs);
+  letter-spacing: var(--pt-track);
+  color: var(--pt-ink-faint);
+  white-space: nowrap;
+}
+
+/* Rendered whether or not there is anything in the cache. `open` used to return
+ * early on an empty list, so on first run the feature did not exist until it
+ * silently appeared one day. */
+.pt-strip-empty {
+  margin: 0;
+  font-size: var(--pt-size-xs);
+  line-height: var(--pt-line-body);
+  color: var(--pt-ink-faint);
+}

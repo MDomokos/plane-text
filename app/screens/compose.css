@@ -19,55 +19,50 @@
 
 /* Name --------------------------------------------------------------------- */
 
-.sc-view-name {
-  flex: none;
-  width: 100%;
-  max-width: var(--pt-art-w);
-  margin: 0 auto;
-  padding: 0 var(--pt-space-4);
-  text-align: center;
-  font-size: var(--pt-size-xs);
-  color: var(--pt-ink-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* The name line was .sc-view-name here until 2026-08-09. It is .app-name in
+ * shell.css now, in a .app-chrome-row beside the delete control, because the
+ * gallery renders the identical row and the alternative was a second copy of it
+ * in paste.css. Nothing about it changed but where it is defined. */
 
 /* Art ---------------------------------------------------------------------- */
 
-/* The box is .app-stage in shell.css and identical on every picture screen.
+/* The box is .app-stage in shell.css and identical on every picture screen, and
+ * the <pre> inside it is .app-art there for the same reason the name line moved:
+ * the gallery paints into one too.
  *
  * touch-action: none for the carousel swipe, same reasoning as capture: the
  * browser would otherwise claim the horizontal drag before pointermove reached
- * the handler. This route is overflow:hidden, so there is no scrolling to lose. */
+ * the handler. This route is overflow:hidden, so there is no scrolling to lose.
+ * It stays here because the swipe is this screen's and the gallery has none. */
 .sc-view-stage {
   touch-action: none;
-}
-
-.sc-view-art {
-  margin: 0;
-  width: max-content;
-  white-space: pre;
-  font-family: var(--pt-mono);
-  color: var(--pt-art-ink);
-  font-kerning: none;
-  font-variant-ligatures: none;
-  text-size-adjust: none;
-  -webkit-text-size-adjust: none;
-  user-select: none;
-  pointer-events: none;   /* the swipe belongs to the stage */
 }
 
 /* Readouts ----------------------------------------------------------------- */
 
 /* The device-fit line is the primary metric and reads as a sentence, because
- * "fits a phone" is what the slider is choosing. */
+ * "fits a phone" is what the slider is choosing.
+ *
+ * IT HAD A padding-top OF --pt-space-1 AND THAT WAS 4px THE BAND DID NOT HAVE.
+ * Removed 2026-08-09.
+ *
+ * .app-chrome-bot already has `padding-top: var(--pt-space-1)` and this is its
+ * first child, so the two stacked. Nothing named the 4px and nothing compared
+ * it against anything, which is the same shape as the 12px --pt-bottom-h used
+ * to carry over --pt-action-h.
+ *
+ * It mattered because the band is a fixed 176px and the count was wrong by
+ * exactly this: 4 + 25 + 4 + 18 + 4 + 44 + 4 + 54 + 4 + 18 is 179, so the band
+ * was overflowing and, being `overflow: hidden` and top-aligned, quietly
+ * clipping the bottom 3px of the status line. The budget in tokens.css says 165
+ * of 176 and never counted this. With it gone and the strip at its shared size
+ * the band comes to 172, and the 4px of slack is what the strip's `margin-top:
+ * auto` spends pinning itself to the bottom. */
 .sc-view-fit {
   flex: none;
   width: 100%;
   max-width: var(--pt-art-w);
   margin: 0 auto;
-  padding-top: var(--pt-space-1);
   text-align: center;
   font-size: var(--pt-size-sm);
   color: var(--pt-ink);
@@ -87,351 +82,37 @@
   color: var(--pt-ink-faint);
 }
 
-/* ==========================================================================
- * SLIDER
- *
- * This control was the one real violation of the design system, and it sat
- * directly under the picture. It was a bare <input type="range"> with
- * `accent-color` and a height, which on iOS Safari and Android Chrome renders
- * the PLATFORM slider: a round thumb on a rounded pill track, in an app whose
- * most-stated rule is
- *
- *     One radius, 2px, on everything, including controls that look like they
- *     want to be round. This is why the shutter is a bar and not a disc.
- *
- * So it is rebuilt from the system's own parts: a 1px hairline track, a gold
- * BAR thumb at 2px radius (a caret, matching the bracket language), a 44px hit
- * area made of padding rather than of height, and 1px tick marks.
- *
- * Two things about styling a range input that are easy to get wrong and are
- * both load-bearing here:
- *
- *   1. -webkit-appearance: none must be set on the INPUT and again on the
- *      thumb pseudo-element. Setting it only on the input leaves iOS drawing
- *      its own thumb on our track, which is the worst of both.
- *   2. The WebKit and Firefox pseudo-elements CANNOT be combined into one
- *      selector list. An unknown pseudo-element invalidates the whole rule in
- *      both engines, so a shared block silently applies to neither. They are
- *      written out twice below. This is not duplication that can be tidied.
- * ========================================================================== */
+/* Slider ------------------------------------------------------------------- */
 
-.sc-slider {
-  position: relative;
-  flex: none;
-  width: calc(100% - var(--pt-space-5) * 2);
-  max-width: calc(var(--pt-art-w) - var(--pt-space-5) * 2);
-  margin: 0 auto;
-}
-.sc-slider[hidden] { display: none; }
-
-/* Hidden for a received message: it is already encoded and there is nothing to
- * choose. Absent rather than disabled, since a disabled control is
- * low-contrast, shows no tooltip on touch, and implies it could be enabled. */
-.sc-view-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  display: block;
-  width: 100%;
-  /* The hit area, and it is the whole 44px. The visible track is 1px in the
-   * middle of it; the padding is what your thumb lands on. Growing the height
-   * instead would grow the reserved band, which every other screen is sized
-   * against. */
-  height: var(--pt-tap);
-  margin: 0;
-  padding: 0;
-  background: none;
-  border: 0;
-  cursor: pointer;
-  touch-action: none;
-}
-.sc-view-slider[hidden] { display: none; }
-
-/* Track. A hairline, the same one every structural rule in the app draws
- * from. */
-.sc-view-slider::-webkit-slider-runnable-track {
-  height: 1px;
-  background: var(--pt-line);
-  border: 0;
-  border-radius: 0;   /* a 1px rule with a radius is a 1px rule */
-}
-.sc-view-slider::-moz-range-track {
-  height: 1px;
-  background: var(--pt-line);
-  border: 0;
-  border-radius: 0;
-}
-
-/* Thumb. A bar, not a disc, and the reason is at the top of this block.
+/* The size control is app/sizeslider.js and its rules are app/sizeslider.css.
+ * Both moved out of this file on 2026-08-09.
  *
- * 3 x 24 is a caret: narrow enough to point at one value on the track rather
- * than straddle a range of them, tall enough to find with a thumb. The margin
- * centres it on a 1px track: WebKit positions the thumb from the track's top
- * edge, so it needs half its own height back. */
-.sc-view-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 3px;
-  height: 24px;
-  margin-top: -12px;
-  background: var(--pt-accent);
-  border: 0;
-  border-radius: var(--pt-radius);
-  cursor: pointer;
-}
-.sc-view-slider::-moz-range-thumb {
-  width: 3px;
-  height: 24px;
-  background: var(--pt-accent);
-  border: 0;
-  border-radius: var(--pt-radius);
-  cursor: pointer;
-}
+ * The block that was here was 130 lines rebuilding input[type=range] out of the
+ * design system's parts, and it stayed after the JS was extracted because
+ * copying it into a component stylesheet would have made two of it -- the one
+ * thing a shared control must not have, since two of its rules are invisible
+ * when broken and would then be free to drift on one platform only.
+ *
+ * It stopped being defensible the moment capture mounted the same component:
+ * the viewfinder's slider was being styled by the VIEWER's stylesheet, and only
+ * because index.html links every screen sheet on every route. Nothing about the
+ * control was ever this screen's. What is still this screen's is when it is
+ * shown at all -- absent for a received message, because there is nothing left
+ * to choose about a message that is already encoded -- and that is in
+ * compose.js, through the component's setHidden().
+ *
+ * The band arithmetic is unchanged by the move: the row is the input's own
+ * --pt-tap and the ticks are absolutely positioned at height 0, so this band is
+ * still the 172 of 176 counted at the top of thumbstrip.css. */
 
-.sc-view-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--pt-accent-hi); }
-.sc-view-slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--pt-accent-hi); }
-
-/* Ticks -------------------------------------------------------------------- */
-
-/* Device markers, drawn UNDER the track rather than on it, so the thumb passing
- * over one never hides it.
+/* The carousel strip is app/thumbstrip.css. Nothing about it is this screen's
+ * any more, including where it sits: the component pins itself to the bottom of
+ * whatever flex column it lands in, which here is .app-chrome-bot. The height
+ * budget for this band, which is what decided the thumbnail's shape, is written
+ * out at the top of that file.
  *
- * See the DEVICE_MARKERS note in compose.js: spec 5.4 asks for four and three
- * of them are off the end of the slider's range, because the range moved to
- * characters on 2026-08-09 and the spec was not updated with it. What is drawn
- * is the one that is in range, plus the range's own endpoints.
- *
- * pointer-events: none throughout. These are labels on a control, and a label
- * that swallows a drag is a control that stops working near its own markings. */
-.sc-slider-ticks {
-  position: absolute;
-  left: 0;
-  right: 0;
-  /* The visible track sits at the vertical centre of the 44px input. */
-  top: calc(var(--pt-tap) / 2);
-  height: 0;
-  pointer-events: none;
-}
-
-.sc-tick {
-  position: absolute;
-  top: 0;
-  width: 1px;
-  height: 6px;
-  background: var(--pt-divider);
-  transform: translateX(-0.5px);
-}
-.sc-tick.is-device { background: var(--pt-line); height: 9px; }
-
-.sc-tick-label {
-  position: absolute;
-  top: 9px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: var(--pt-size-2xs);
-  letter-spacing: var(--pt-track);
-  line-height: 1;
-  color: var(--pt-ink-faint);
-  white-space: nowrap;
-}
-/* The endpoint labels are bare column counts and sit at the extremes, where a
- * centred label would run off the track. Pin them inside. */
-.sc-tick:first-child .sc-tick-label { left: 0; transform: none; }
-.sc-tick:last-child .sc-tick-label { left: auto; right: 0; transform: none; }
-
-/* ==========================================================================
- * CAROUSEL STRIP
- *
- * The strip exists to make the swipe discoverable. That is its whole job: a
- * horizontal drag on a picture is invisible until something on screen implies
- * there is more than one picture.
- *
- * Small on purpose. This is an undo for leaving the app rather than a gallery
- * (see recents.js, whose argument still holds), and eight 40px thumbnails is
- * the largest it can be without looking like the History feature that was cut.
- * ========================================================================== */
-
-.sc-strip {
-  flex: none;
-  display: flex;
-  align-items: flex-start;
-  gap: var(--pt-space-2);
-  width: 100%;
-  max-width: var(--pt-art-w);
-  margin: 0 auto;
-  padding: 0 var(--pt-space-3) 2px;
-  overflow-x: auto;
-
-  /* maybe-rain's signature scrollbar, which this app was not using anywhere.
-   * The recents strip hid its scrollbar entirely, which on desktop is a lost
-   * affordance and a lost piece of identity. The 2px border in the background
-   * colour with background-clip: padding-box is what makes a 6px bar read as a
-   * thin gold line rather than as a chunky browser control. */
-  scrollbar-width: thin;
-  scrollbar-color: var(--pt-accent) transparent;
-}
-.sc-strip::-webkit-scrollbar { height: 6px; }
-.sc-strip::-webkit-scrollbar-track { background: transparent; }
-.sc-strip::-webkit-scrollbar-thumb {
-  background: var(--pt-accent);
-  border: 2px solid var(--pt-bg);
-  background-clip: padding-box;
-  border-radius: var(--pt-radius);
-}
-
-.sc-strip-item {
-  position: relative;
-  flex: none;
-}
-
-.sc-strip-thumb {
-  display: block;
-  /* One size for both strips. Was 30px against the open screen's 46px, for the
-   * same eight entries out of the same cache. See --pt-thumb-w in tokens.css
-   * for why the shared number is 36 and not 46. */
-  width: var(--pt-thumb-w);
-  padding: 0 0 3px;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  border-radius: 0;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-/* The gold underline, the universal selection idiom in this system. The same
- * mark the style row uses, for the same reason: it says "this one" without
- * introducing a second shape. */
-.sc-strip-thumb.is-on { border-bottom-color: var(--pt-accent); }
-
-.sc-strip-box {
-  display: block;
-  height: var(--pt-thumb-h);
-  overflow: hidden;
-  border-radius: var(--pt-radius);
-  box-shadow: inset 0 0 0 1px var(--pt-line);
-  background: var(--pt-art-bg);
-}
-
-.sc-strip-art {
-  margin: 0;
-  white-space: pre;
-  font-family: var(--pt-mono);
-  color: var(--pt-art-ink);
-  font-kerning: none;
-  font-variant-ligatures: none;
-}
-
-/* Delete. The only destructive control in the app.
- *
- * Visible rather than behind a long-press, because a long-press is invisible
- * and an undo cache you cannot prune is not an undo cache. Quiet until you go
- * near it: faint by default, error-coloured on hover and focus, so it reads as
- * available rather than as a threat sitting on every thumbnail.
- *
- * ---------------------------------------------------------------------------
- * THE TARGET WAS EATING THE THUMBNAIL IT SAT ON. Fixed 2026-08-09.
- *
- * It was 22x22 at top:-6 right:-8 with `::before { inset: -11px }` to make the
- * 44px minimum. .sc-strip-item was 30 wide by 44 tall at the time (40 art +
- * 3 padding + 1 underline), so that target measured:
- *
- *   x  30 + 8 - 22 - 11 =  5   ..  30 + 8 + 11 = 49
- *   y      -6 - 11      = -17  ..  -6 + 22 + 11 = 27
- *
- * 25 of the thumbnail's 30 columns and 27 of its 44 rows: 51% of the
- * selectable area of the button it is supposed to annotate. And it ran to
- * x=49 when the next item started at 38 (30 + the strip's 8px gap), so it also
- * covered 11px of the NEIGHBOUR, and its delete. Tapping a thumbnail to select
- * it deleted it instead, which is the whole reported bug.
- *
- * The 44px was never real. .sc-strip is overflow-x: auto, and a computed
- * overflow of visible on one axis beside a scroller on the other becomes auto,
- * so the strip clips its children vertically and there is no scrollable
- * overflow on the block-start side. Everything above y=0 was discarded: the
- * button rendered 16px tall, not 22, and the top 11px of the hit box did not
- * exist.
- *
- * The hit box is now exactly the visible button, hung into the gap. At the
- * shared thumbnail size (--pt-thumb-w 36, --pt-thumb-h 48, so the item is
- * 36 x 52 with its padding and underline):
- *
- *   x  36 + 8 - 22 = 22  ..  44, the first pixel of the next item
- *   y  0                 ..  22
- *
- * 14 of 36 columns and 22 of 52 rows, so 16% of the thumbnail's area against
- * the old 51%, nothing over the neighbour, and the whole button is on screen
- * for the first time. There is nowhere left to grow into: above is clipped,
- * right is the next thumbnail, below and left are the picture.
- *
- * The x arithmetic is width-independent -- the button hangs off the right edge
- * by exactly the gap -- so it survives a change to --pt-thumb-w. Only the
- * coverage fractions above move.
- *
- * THAT IS A 22px TARGET AND --pt-tap IS 44. Said out loud, because actionbar.js
- * throws rather than render a 43px slot. It is the same rule read the other
- * way: there the cost of a small target is a primary action you cannot hit, and
- * here the cost of a large one is a picture you cannot keep. This control also
- * arms before it fires (see the armed rule below and compose.js), so missing it
- * costs one tap and hitting it by accident costs nothing.
- * --------------------------------------------------------------------------- */
-.sc-strip-del {
-  position: absolute;
-  top: 0;
-  /* Exactly .sc-strip's gap, so the button stops where the next item begins.
-   * The gap is dead space, so spending it costs no selectable pixels. */
-  right: calc(var(--pt-space-2) * -1);
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  background: var(--pt-bg);
-  border: 0;
-  border-radius: var(--pt-radius);
-  color: var(--pt-ink-faint);
-  font-family: inherit;
-  font-size: var(--pt-size-xs);
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0.55;
-  /* box-shadow is in the list for the armed ring below: without it the ring
-   * snaps on while the ink warms over 200ms, which reads as two things
-   * happening rather than one state changing. */
-  transition: color var(--pt-dur-base) ease, opacity var(--pt-dur-base) ease, box-shadow var(--pt-dur-base) ease;
-  touch-action: manipulation;
-}
-.sc-strip-del:hover,
-.sc-strip-del:focus-visible { color: var(--pt-error); opacity: 1; }
-
-/* Armed: the next tap is the one that deletes. The same two declarations as
- * .sc-set-btn.is-danger[data-armed="1"] in settings.css, because it is the same
- * promise made by the same idiom, and error-coloured only once armed for the
- * same reason: a red mark sitting on every thumbnail reads as a warning about
- * the pictures rather than about the action.
- *
- * compose.js swaps the glyph from × to ✓ with the attribute. The button is one
- * cell wide at --pt-size-xs, so the character has to carry what CLEAR ALL says
- * in four words. Full opacity as well: armed is not a hover state and must
- * survive the pointer leaving. */
-.sc-strip-del[data-armed="1"] {
-  box-shadow: inset 0 0 0 1px var(--pt-error);
-  color: var(--pt-error);
-  opacity: 1;
-}
-
-/* The cap, said out loud, and only once it is in sight. See recents.capNote().
- * Delete is what makes this mandatory: once there is a delete button the user
- * believes this is storage, and silent eviction at eight entries is then data
- * loss rather than an undo cache doing its job. */
-.sc-strip-cap {
-  flex: none;
-  align-self: center;
-  margin: 0 0 0 var(--pt-space-2);
-  font-size: var(--pt-size-2xs);
-  letter-spacing: var(--pt-track);
-  color: var(--pt-ink-faint);
-  white-space: nowrap;
-}
+ * The one number that moved on this side is .sc-view-fit's padding-top; see
+ * that rule. */
 
 /* Save sheet --------------------------------------------------------------- */
 

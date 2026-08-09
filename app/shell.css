@@ -206,9 +206,17 @@ body[data-route="paste"] { grid-template-rows: 1fr auto; }
 
 /* The capture screen is full-bleed: the viewfinder owns the whole area.
  * Compose is the same screen showing a still, so it gets the same treatment.
- * Paste keeps its padding: it is a form, not a picture. */
+ *
+ * Paste joined them on 2026-08-09, and it is a correction rather than an
+ * addition. That screen used to be a scrolling form with a --pt-space-4 gutter,
+ * and it is now the gallery: it builds .app-frame and puts a picture in the
+ * stage, so it has to be measured against exactly the same box as the other two
+ * or the picture lands somewhere else on it. Padding on the container is
+ * precisely the thing that makes a stage a different size, which is the bug
+ * --pt-chrome-top / --pt-chrome-bot exist to have fixed. */
 body[data-route="capture"] .app-screen,
-body[data-route="compose"] .app-screen { padding: 0; overflow: hidden; }
+body[data-route="compose"] .app-screen,
+body[data-route="paste"] .app-screen { padding: 0; overflow: hidden; }
 
 /* THE TOP SAFE AREA ON THE HEADERLESS ROUTES. Added 2026-08-09.
  *
@@ -230,13 +238,23 @@ body[data-route="compose"] .app-screen { padding: 0; overflow: hidden; }
  * without any band's fixed height having to know about the notch.
  *
  * Settings is untouched: its header is visible and already pads itself, and
- * adding it here as well would count the inset twice. */
+ * adding it here as well would count the inset twice.
+ *
+ * Paste is in this list as of 2026-08-09 for the same reason it is in the one
+ * above: it is a picture screen now, its top band is a 44px --pt-chrome-top like
+ * the others, and on a notched iPhone in standalone the inset is 47-59px, which
+ * would put the whole band and the delete control in it underneath the clock. */
 body[data-route="capture"] .app-screen,
-body[data-route="compose"] .app-screen { padding-top: var(--pt-safe-top); }
+body[data-route="compose"] .app-screen,
+body[data-route="paste"] .app-screen { padding-top: var(--pt-safe-top); }
 
-body[data-route="paste"] .app-screen {
-  padding-top: calc(var(--pt-space-4) + var(--pt-safe-top));
-}
+/* `paste` used to reserve its own bottom gutter here, zeroed on .app-screen and
+ * re-added as --pt-strip-gutter on .sc-open, so that a strip flowing at the
+ * bottom of a form column would end the same distance above the action bar as
+ * the viewer's strip does. The gallery does not need any of that: it has a real
+ * .app-chrome-bot with a real .app-status in it, so the strip's own
+ * `margin-top: auto` lands it in the identical place by the identical mechanism
+ * on both screens. The token went with the rule; see tokens.css. */
 
 .app-screen:focus { outline: none; }
 
@@ -301,6 +319,106 @@ body[data-route="paste"] .app-screen {
   background: var(--pt-art-bg);
 }
 
+/* The picture itself ------------------------------------------------------- */
+
+/* The <pre> the art is painted into, on every screen that paints art into one.
+ * Added 2026-08-09 with the gallery, and it is here rather than in a screen's
+ * stylesheet for the reason .app-status is: two screens now render the same
+ * object, and the last time two screens rendered the same object independently
+ * they disagreed about six properties of it (see thumbstrip.js).
+ *
+ * Capture is the exception and stays one: it draws to a canvas through a glyph
+ * atlas, argued out in note 2 of capture.js's header. This rule is for the
+ * screens that prove what the recipient's font will actually do.
+ *
+ * `width: max-content` is load-bearing and not a tidy-up. Without it the element
+ * clamps to its container, and a grid that under-fills then MEASURES as a
+ * perfect fit -- the same mistake that cost the wrapper a round of Test D. See
+ * paintArt() in art.js.
+ *
+ * pointer-events: none because the picture is not a target. The viewer's
+ * carousel swipe is bound to the stage, and a <pre> that swallowed the
+ * pointerdown would make the gesture dead in the middle of the picture, which is
+ * where it is made. */
+.app-art {
+  margin: 0;
+  width: max-content;
+  white-space: pre;
+  font-family: var(--pt-mono);
+  color: var(--pt-art-ink);
+  font-kerning: none;
+  font-variant-ligatures: none;
+  text-size-adjust: none;
+  -webkit-text-size-adjust: none;
+  user-select: none;
+  pointer-events: none;
+}
+.app-art[hidden] { display: none; }
+
+/* The title row in the top band -------------------------------------------- */
+
+/* One row, in --pt-chrome-top, on the two screens that show a saved picture:
+ * the message's name, and the control that deletes it.
+ *
+ * THREE COLUMNS, THE OUTER TWO FIXED AND EQUAL. That is the whole rule and it
+ * has one job: keep the name centred on the PICTURE rather than on whatever is
+ * left after the button. The button's label changes length when it arms
+ * (thumbstrip.css: DELETE, 6 characters, becomes TAP AGAIN, 9), so an `auto`
+ * column would shove the name sideways on the first of two taps, in the band
+ * whose entire purpose is that nothing moves. The third column is empty and
+ * exists to be the same width as the first.
+ *
+ * calc(var(--pt-tap) * 2) is .pt-del's own min-width, so the column and the
+ * control it holds are the same number derived the same way. It is the measured
+ * width of the longer label; the arithmetic is written out in thumbstrip.css.
+ *
+ * Capture has its own version of this row (.sc-top-row) with the flip on the
+ * left and the gear on the right, built before this one and solving the same
+ * problem with absolute positioning and symmetric padding. They are not merged
+ * because capture's corner controls are one --pt-tap square each and this one's
+ * is twice that: merging would mean one gutter token serving two different
+ * measurements, which is how the two recents strips started. */
+.app-chrome-row {
+  display: grid;
+  grid-template-columns: calc(var(--pt-tap) * 2) 1fr calc(var(--pt-tap) * 2);
+  align-items: center;
+  min-height: var(--pt-tap);
+
+  /* Clamped to the art, like every other piece of chrome. Not the stage: that
+   * is the box the art is measured against and clamping it feeds the
+   * measurement back into itself. */
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin: 0 auto;
+}
+
+/* The first cell. A screen appends this before the name so the grid order is
+ * fixed by the DOM, and hands it to thumbStrip() as `deleteHost`. It keeps its
+ * width when the button inside it is hidden, which is what stops the name
+ * sliding across on an empty gallery. */
+.app-chrome-slot {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* The name line. Provenance is the only thing distinguishing three otherwise
+ * identical screens, so it is stated rather than implied: "kachunk 20260809 1432
+ * · shot".
+ *
+ * Moved out of compose.css on 2026-08-09, where it was .sc-view-name and the
+ * gallery would have had to copy it. */
+.app-name {
+  margin: 0;
+  min-width: 0;
+  text-align: center;
+  font-size: var(--pt-size-xs);
+  color: var(--pt-ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The status line --------------------------------------------------------- */
 
 /* One line, in the bottom chrome band, for anything transient a screen needs
@@ -317,7 +435,9 @@ body[data-route="paste"] .app-screen {
  * that nothing moves. */
 .app-status {
   flex: none;
-  min-height: 18px;
+  /* A token since 2026-08-09, because the open screen has to reserve the same
+   * room without having one of these. See --pt-status-h in tokens.css. */
+  min-height: var(--pt-status-h);
   margin: 0;
   width: 100%;
   max-width: var(--pt-art-w);

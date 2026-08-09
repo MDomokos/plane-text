@@ -129,13 +129,75 @@ export function startViewfinder({
   // away at any time, most often when the OS is under memory pressure, which on
   // a phone is exactly when someone is trying to take a photograph. Recovering
   // means putting a NEW canvas in the old one's place. Hence the indirection.
+  //
+  // ---------------------------------------------------------------------------
+  // A CANVAS ELEMENT IS SINGLE-USE HERE, AND THAT IS NOT OPTIONAL. 2026-08-09.
+  //
+  // The caller must hand a FRESH element to every startViewfinder() call. It is
+  // a hard requirement of the DOM rather than a preference of this file, and
+  // ignoring it is what made the front/rear flip hang:
+  //
+  //   stop() calls renderer.dispose(), which ends with ext.loseContext() to
+  //   hand the GPU back rather than wait for GC. getContext() is specified to
+  //   return the SAME context object for an element that already has one, and a
+  //   context lost that way is never restored, so a second startViewfinder() on
+  //   the same element got a dead WebGL context; createGlyphRenderer() then
+  //   failed to compile against it and returned null; useCanvas2d() ran; and
+  //   getContext('2d') on an element that already holds a WebGL context returns
+  //   NULL. `ctx2d.imageSmoothingEnabled = false` threw, synchronously, out of
+  //   startViewfinder, out of the caller's await, leaving `vf` null with no
+  //   loop and a canvas showing the last frame the dead context painted.
+  //
+  // Which is precisely the reported symptom: dead until you navigate away and
+  // back, because a fresh mount builds a fresh <canvas>.
+  //
+  // capture.js now mounts a new element per source. The null-context branch
+  // below stays as the net -- degrading to a 2D blit is survivable, throwing
+  // out of the constructor is not -- and warns, because if it ever fires the
+  // caller has broken the contract and the user is paying ~30ms a frame for it.
+  // ---------------------------------------------------------------------------
   let surface = canvas;
   let renderer = null;
   let ctx2d = null;
 
+  // The last CSS size written to the surface, so an unchanged frame writes
+  // nothing. A style write on an element the next frame is about to read from
+  // is what turns a cheap read into a full layout flush.
+  //
+  // Declared up here rather than beside the other per-frame state because
+  // replaceSurface() has to clear it, and replaceSurface() runs during
+  // construction on the fallback path -- a `let` further down the file would
+  // still be in its temporal dead zone at that point.
+  let cssW = '';
+  let cssH = '';
+
+  // Swap the drawing surface for a clone of itself: same class, same role, same
+  // aria-label, same position in the stage, no context of any kind.
+  function replaceSurface() {
+    const replacement = surface.cloneNode(false);
+    replacement.width = 0;
+    replacement.height = 0;
+    surface.replaceWith(replacement);
+    surface = replacement;
+    // The replacement carries none of the old element's inline size, and the
+    // memo above exists to SKIP writing a size it believes is already there.
+    // Without this the next frame writes nothing and the canvas lays out at its
+    // attribute size instead of its CSS size -- a picture that is suddenly the
+    // wrong scale, with no error anywhere.
+    cssW = '';
+    cssH = '';
+  }
+
   function useCanvas2d() {
     renderer = null;
     ctx2d = surface.getContext('2d');
+    if (!ctx2d) {
+      // Only reachable when the element arrived here already carrying a WebGL
+      // context. See the contract note above; this is the net, not the fix.
+      console.warn('viewfinder: canvas already had a context, replacing it');
+      replaceSurface();
+      ctx2d = surface.getContext('2d');
+    }
     // The blit is a 1:1 device-pixel copy. Smoothing would only ever cost time
     // here, and on a fractional DPR it would soften every glyph edge in the
     // atlas -- which is the coverage information rule 1 exists to preserve.
@@ -144,12 +206,8 @@ export function startViewfinder({
 
   function onContextLost() {
     console.warn('viewfinder: WebGL context lost, falling back to canvas2d');
-    const replacement = surface.cloneNode(false);
-    replacement.width = 0;
-    replacement.height = 0;
-    surface.replaceWith(replacement);
+    replaceSurface();
     if (renderer) renderer.dispose();
-    surface = replacement;
     useCanvas2d();
     // The atlas is unchanged, but the new canvas has painted nothing yet, and
     // the rAF gate could be up to a frame away. Paint on the next tick rather
@@ -171,12 +229,6 @@ export function startViewfinder({
     }
   });
   ro.observe(stage);
-
-  // The last CSS size written to the surface, so an unchanged frame writes
-  // nothing. A style write on an element the next frame is about to read from
-  // is what turns a cheap read into a full layout flush.
-  let cssW = '';
-  let cssH = '';
 
   // The smoothed endpoints, in post-unsharp luma space. Null until the first
   // measured frame, which is also the frame that renders unsmoothed -- there is
@@ -347,12 +399,35 @@ export function startViewfinder({
 
     busy = true;
     const t0 = performance.now();
+    let painted = null;
     try {
-      renderOnce();
+      painted = renderOnce();
     } finally {
       busy = false;
     }
     const dt = performance.now() - t0;
+
+    // A FRAME THAT PAINTED NOTHING IS NOT A FAST FRAME. Added 2026-08-09.
+    //
+    // renderOnce() returns null when grabPreview() had no pixels -- the sensor
+    // is not producing yet -- or when encode() threw on a bad charset. Both
+    // return in well under a millisecond, and the code below used to feed that
+    // into the ring, the ladder and onStats as though it were a rendered frame.
+    //
+    // This is the flip's window. Re-acquiring the camera after track.stop() on
+    // the same hardware can go a few hundred milliseconds with videoWidth at 0,
+    // which at 20fps is a run of empty frames long enough to move goodRun a
+    // fifth of the way to RECOVER_LIMIT and to drag meanFrameMs toward zero --
+    // the ladder climbing on evidence that does not exist, and the perf readout
+    // reporting a frame time for frames that never happened.
+    //
+    // Returning here rather than stopping is the recovery: schedule() already
+    // ran at the top of this tick, so the loop keeps turning at display rate
+    // and the first frame the camera produces is rendered by the ordinary path.
+    // The viewfinder needs no signal that the source came back, and there is
+    // nothing for the flip to await -- which is why extending waitForFrame's
+    // deadline in camera.js would have been the wrong fix.
+    if (!painted) return;
 
     times[timeIdx] = dt;
     timeIdx = (timeIdx + 1) % times.length;
@@ -410,15 +485,29 @@ export function startViewfinder({
       schedule();
     }
   };
-  document.addEventListener('visibilitychange', onVisibility, { signal });
-
-  if (signal) signal.addEventListener('abort', () => stop());
+  // Registered against this viewfinder's own lifetime, not the caller's.
+  //
+  // Both listeners used to take ctx.signal, which only aborts on unmount. A
+  // screen that starts a second viewfinder without navigating -- the flip, and
+  // the retry button in the failure notice -- therefore accumulated a
+  // visibilitychange listener and an abort listener per attempt, every one of
+  // them still pointing at a stopped instance. They were inert (schedule() and
+  // tick() both return early once `stopped` is set) but they were also
+  // unbounded, and "inert" is a property of the current early returns rather
+  // than a guarantee. Chaining an owned controller off the caller's signal
+  // keeps the unmount behaviour identical and makes stop() the one thing that
+  // ends this instance, whoever called it.
+  const own = new AbortController();
+  document.addEventListener('visibilitychange', onVisibility, { signal: own.signal });
+  if (signal) signal.addEventListener('abort', () => stop(), { signal: own.signal });
 
   function stop() {
+    if (stopped) return;
     stopped = true;
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
     ro.disconnect();
+    own.abort();
     // A browser caps live WebGL contexts per page at a low number, and it
     // evicts the oldest silently. Navigating to compose and back a few times
     // would otherwise cost us the context we are still using.

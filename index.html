@@ -38,9 +38,12 @@
 
      Ordinary <link> tags rather than @import, because @import serialises the
      fetches. Every one of these files is precached, so on the flight that
-     matters they all come from the cache at once. Adding a screen stylesheet
-     means adding it here and running `npm run precache`. -->
+     matters they all come from the cache at once. Adding a stylesheet, whether
+     a screen's or a component's, means adding it here and running
+     `npm run precache`. -->
 <link rel="stylesheet" href="app/actionbar.css">
+<link rel="stylesheet" href="app/sizeslider.css">
+<link rel="stylesheet" href="app/thumbstrip.css">
 <link rel="stylesheet" href="app/screens/capture.css">
 <link rel="stylesheet" href="app/screens/paste.css">
 <link rel="stylesheet" href="app/screens/compose.css">

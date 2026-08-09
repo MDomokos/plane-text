@@ -18,7 +18,7 @@
 import { defineScreen } from '../screen.js';
 import { register } from '../router.js';
 import { CALIBRATION_DEFAULT } from '../../src/constants.js';
-import { offlineLabel, verify, applyUpdate } from '../offline.js';
+import { offlineLabel, verify, applyUpdate, checkForUpdate } from '../offline.js';
 import * as recents from '../recents.js';
 
 const CALIBRATION = [
@@ -112,7 +112,56 @@ export default register(defineScreen({
     }
 
     state.subscribe((_s, changed) => { if (changed.has('offline')) paintOffline(); }, { signal: ctx.signal });
-    recheck.addEventListener('click', () => { verify(); }, { signal: ctx.signal });
+    // CHECK AGAIN DID NOTHING. Fixed 2026-08-09.
+    //
+    // It was `() => { verify(); }`. Two faults, either one fatal.
+    //
+    // verify() has no side effects: it returns a promise carrying the worker's
+    // reply. The store patch lives in run(), a closure inside startOffline()
+    // that this screen has no reference to. So the click posted a message, the
+    // worker audited its cache, replied down the MessageChannel, and the answer
+    // was dropped. Nothing repainted. checkedAt did not even move, so the one
+    // observable thing the button could have changed did not change.
+    //
+    // And the question was the wrong one anyway. PT_VERIFY asks the CURRENT
+    // controller to audit ITS OWN cache -- "is the build I am running
+    // complete". A button labelled CHECK AGAIN, sitting under a version string,
+    // in an app that ships from a push to main, is read as "is there a newer
+    // one", and nothing in the app asked that. See checkForUpdate() in
+    // offline.js.
+    //
+    // Now it does both, in that order, and reports. Awaiting the update check
+    // first matters: if it finds a new worker, the registration's updatefound
+    // handler fires and patches `update: true`, and the APPLY UPDATE button is
+    // hidden until it does.
+    recheck.addEventListener('click', async () => {
+      recheck.disabled = true;
+      recheck.textContent = 'CHECKING…';
+      try {
+        await checkForUpdate({ force: true });
+        const result = await verify();
+        // Patched here rather than left to startOffline's run(), because this
+        // screen is where the readout is and a button that changes nothing on
+        // screen is the bug being fixed.
+        state.set({
+          offline: {
+            ...state.get().offline,
+            ...(result
+              ? {
+                state: result.ready ? 'ready' : 'incomplete',
+                ready: Boolean(result.ready),
+                version: result.version || null,
+                missing: result.missing || [],
+                shell: Boolean(result.shell),
+              }
+              : {}),
+            checkedAt: Date.now(),
+          },
+        });
+      } finally {
+        if (recheck.isConnected) { recheck.disabled = false; recheck.textContent = 'CHECK AGAIN'; }
+      }
+    }, { signal: ctx.signal });
     update.addEventListener('click', () => { applyUpdate(); }, { signal: ctx.signal });
 
     // --- calibration -----------------------------------------------------

@@ -1,0 +1,199 @@
+/* Plane Text: the size control. See sizeslider.js for what the component owns.
+ *
+ * ===========================================================================
+ * WHERE THESE RULES CAME FROM, AND WHY THEY ARE NOT IN compose.css ANY MORE.
+ *
+ * Every declaration below was in app/screens/compose.css until 2026-08-09,
+ * under a SLIDER heading and a Ticks heading below it, because the control was
+ * built inline by compose.js and no other screen drew one. When the slider was
+ * extracted into app/sizeslider.js so the viewfinder could mount it too, the
+ * CSS did not come with it. The component's header recorded that as deliberate
+ * and wrong -- the alternative that day was a second copy of 130 lines of range
+ * input, which is the exact thing the module exists to prevent -- and named
+ * this file as where the block would land once compose.css was free.
+ *
+ * It is more than tidying. A component that renders correctly only when a
+ * particular SCREEN's stylesheet happens to be loaded is backwards, and capture
+ * was relying on precisely that: index.html links every screen sheet on every
+ * route, so the viewfinder's slider was drawing itself out of the viewer's
+ * stylesheet. Route-scope the sheets the way body[data-route] already scopes
+ * .app-screen, or drop compose.css from the <link> list, and capture loses the
+ * track, the thumb and the 44px hit area at once, on a screen whose source
+ * never mentions compose.
+ *
+ * THE NAMES CHANGED PREFIX WITH THE MOVE. .sc-slider, .sc-view-slider,
+ * .sc-slider-ticks, .sc-tick and .sc-tick-label were the viewer screen's
+ * namespace, and a component two screens mount does not live inside one of
+ * their namespaces. They are .pt-* here, as .pt-actionbar and .pt-strip are.
+ * The input is the one rename that is not a bare prefix swap: `view` is the
+ * viewer's word for itself, so .sc-view-slider is .pt-slider-input rather than
+ * .pt-view-slider. Carrying the screen's word into the shared component would
+ * have left the drift in place under a new prefix.
+ *
+ * ===========================================================================
+ * THE ROW IS EXACTLY --pt-tap TALL, AND TWO BANDS ARE COUNTED AGAINST THAT.
+ *
+ * .pt-slider-ticks is position:absolute with height 0 inside a
+ * position:relative .pt-slider, so the wrapper's height is the input's height
+ * and nothing else. Both height budgets depend on that number and neither
+ * screen owns it any more: the viewer's band is 172 of 176 (thumbstrip.css) and
+ * capture's is 100 of 176 (capture.css), each counting this row as 44. A height
+ * added here moves the picture on every screen in the app at once, which is
+ * what tokens.css spends sixty lines forbidding. Grow the hit area with the
+ * input's own height, as below; never with the wrapper's.
+ * ========================================================================== */
+
+/* ==========================================================================
+ * SLIDER
+ *
+ * This control was the one real violation of the design system, and it sat
+ * directly under the picture. It was a bare <input type="range"> with
+ * `accent-color` and a height, which on iOS Safari and Android Chrome renders
+ * the PLATFORM slider: a round thumb on a rounded pill track, in an app whose
+ * most-stated rule is
+ *
+ *     One radius, 2px, on everything, including controls that look like they
+ *     want to be round. This is why the shutter is a bar and not a disc.
+ *
+ * So it is rebuilt from the system's own parts: a 1px hairline track, a gold
+ * BAR thumb at 2px radius (a caret, matching the bracket language), a 44px hit
+ * area made of padding rather than of height, and 1px tick marks.
+ *
+ * Two things about styling a range input that are easy to get wrong and are
+ * both load-bearing here:
+ *
+ *   1. -webkit-appearance: none must be set on the INPUT and again on the
+ *      thumb pseudo-element. Setting it only on the input leaves iOS drawing
+ *      its own thumb on our track, which is the worst of both.
+ *   2. The WebKit and Firefox pseudo-elements CANNOT be combined into one
+ *      selector list. An unknown pseudo-element invalidates the whole rule in
+ *      both engines, so a shared block silently applies to neither. They are
+ *      written out twice below. This is not duplication that can be tidied.
+ * ========================================================================== */
+
+.pt-slider {
+  position: relative;
+  flex: none;
+  width: calc(100% - var(--pt-space-5) * 2);
+  max-width: calc(var(--pt-art-w) - var(--pt-space-5) * 2);
+  margin: 0 auto;
+}
+.pt-slider[hidden] { display: none; }
+
+/* Hidden for a received message: it is already encoded and there is nothing to
+ * choose. Absent rather than disabled, since a disabled control is
+ * low-contrast, shows no tooltip on touch, and implies it could be enabled.
+ *
+ * setHidden() in sizeslider.js sets the attribute on the wrapper AND on the
+ * input, because the two rules are separate and a wrapper that collapses around
+ * a visible input is a control that half exists. */
+.pt-slider-input {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  /* The hit area, and it is the whole 44px. The visible track is 1px in the
+   * middle of it; the padding is what your thumb lands on. Growing the height
+   * instead would grow the reserved band, which every other screen is sized
+   * against. */
+  height: var(--pt-tap);
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  touch-action: none;
+}
+.pt-slider-input[hidden] { display: none; }
+
+/* Track. A hairline, the same one every structural rule in the app draws
+ * from. */
+.pt-slider-input::-webkit-slider-runnable-track {
+  height: 1px;
+  background: var(--pt-line);
+  border: 0;
+  border-radius: 0;   /* a 1px rule with a radius is a 1px rule */
+}
+.pt-slider-input::-moz-range-track {
+  height: 1px;
+  background: var(--pt-line);
+  border: 0;
+  border-radius: 0;
+}
+
+/* Thumb. A bar, not a disc, and the reason is at the top of this block.
+ *
+ * 3 x 24 is a caret: narrow enough to point at one value on the track rather
+ * than straddle a range of them, tall enough to find with a thumb. The margin
+ * centres it on a 1px track: WebKit positions the thumb from the track's top
+ * edge, so it needs half its own height back. */
+.pt-slider-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 3px;
+  height: 24px;
+  margin-top: -12px;
+  background: var(--pt-accent);
+  border: 0;
+  border-radius: var(--pt-radius);
+  cursor: pointer;
+}
+.pt-slider-input::-moz-range-thumb {
+  width: 3px;
+  height: 24px;
+  background: var(--pt-accent);
+  border: 0;
+  border-radius: var(--pt-radius);
+  cursor: pointer;
+}
+
+.pt-slider-input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--pt-accent-hi); }
+.pt-slider-input:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--pt-accent-hi); }
+
+/* Ticks -------------------------------------------------------------------- */
+
+/* Device markers, drawn UNDER the track rather than on it, so the thumb passing
+ * over one never hides it.
+ *
+ * See the DEVICE_MARKERS note in sizeslider.js: spec 5.4 asks for four and
+ * three of them are off the end of the slider's range, because the range moved
+ * to characters on 2026-08-09 and the spec was not updated with it. What is
+ * drawn is the one that is in range, plus the range's own endpoints.
+ *
+ * pointer-events: none throughout. These are labels on a control, and a label
+ * that swallows a drag is a control that stops working near its own markings. */
+.pt-slider-ticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* The visible track sits at the vertical centre of the 44px input. */
+  top: calc(var(--pt-tap) / 2);
+  height: 0;
+  pointer-events: none;
+}
+
+.pt-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 6px;
+  background: var(--pt-divider);
+  transform: translateX(-0.5px);
+}
+.pt-tick.is-device { background: var(--pt-line); height: 9px; }
+
+.pt-tick-label {
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--pt-size-2xs);
+  letter-spacing: var(--pt-track);
+  line-height: 1;
+  color: var(--pt-ink-faint);
+  white-space: nowrap;
+}
+/* The endpoint labels are bare column counts and sit at the extremes, where a
+ * centred label would run off the track. Pin them inside. */
+.pt-tick:first-child .pt-tick-label { left: 0; transform: none; }
+.pt-tick:last-child .pt-tick-label { left: auto; right: 0; transform: none; }
