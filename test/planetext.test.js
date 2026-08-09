@@ -2482,3 +2482,92 @@ test('a canvas element is never handed to two viewfinders, and the front camera 
     );
   }
 });
+
+test('the clipboard dot asks the permission and never provokes a prompt', async () => {
+  // clipboardMayHavePayload() was `return false;` in capture.js from the day the
+  // action bar was written until 2026-08-09, so `.pt-dot` -- the only gold the
+  // bar permits on a non-hero slot -- had a rule in actionbar.css and no code
+  // path that could produce it. Same shape as the PNG export that was a
+  // console.warn and the three settings routes nothing linked to.
+  //
+  // What is pinned here is not that it works. It is the ONE way it must not:
+  // readText() on a 'prompt' state raises a permission dialog, and this runs at
+  // mount on the launch screen with no user gesture behind it. A dialog nobody
+  // asked for, over a viewfinder, to decide whether to draw four pixels of gold.
+  const { clipboardMayHavePayload, looksLikeMessage } = await import('../app/pipeline.js');
+  const { encode } = await import('../src/encode.js');
+  const real = encode(new Uint8ClampedArray(60 * 80 * 4).fill(200), 60, 80, { cols: 40, title: 'x' }).message;
+
+  let reads = 0;
+  const withNav = async (state, text, { queryThrows = false } = {}) => {
+    reads = 0;
+    const nav = {
+      permissions: {
+        query: async () => {
+          // WebKit and Firefox do not implement the `clipboard-read` name and
+          // reject rather than answering. That is the platform this feature is
+          // permanently off on, and it must be off rather than broken.
+          if (queryThrows) throw new TypeError('clipboard-read is not a valid permission name');
+          return { state };
+        },
+      },
+      clipboard: { readText: async () => { reads += 1; return text; } },
+    };
+    const had = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true });
+    try { return await clipboardMayHavePayload(); }
+    finally {
+      if (had) Object.defineProperty(globalThis, 'navigator', had);
+      else delete globalThis.navigator;
+    }
+  };
+
+  assert.equal(await withNav('prompt', real), false, "'prompt' must answer false");
+  assert.equal(reads, 0, "'prompt' must not read the clipboard: reading is what raises the dialog");
+  assert.equal(await withNav('denied', real), false, "'denied' must answer false");
+  assert.equal(reads, 0, "'denied' must not read the clipboard either");
+  assert.equal(await withNav('granted', real, { queryThrows: true }), false, 'an engine without the permission name answers false');
+  assert.equal(reads, 0, 'and does not reach the clipboard on the way');
+
+  // Only when it is already granted, and only when what is there is ours. A dot
+  // on a shopping list would send the user to a screen that then tells them the
+  // paste did not look like a Plane Text image.
+  assert.equal(await withNav('granted', real), true, 'granted, and one of ours');
+  assert.equal(reads, 1);
+  // STRICTER THAN looksLikeMessage(), and this assertion is the reason the
+  // implementation does not reuse it. That predicate accepts anything that
+  // parses into a grid, because it runs AFTER a deliberate paste, where a false
+  // positive only changes which error you get. Almost any text passes it -- a
+  // shopping list is a one-row grid -- and it returns true for the string below.
+  //
+  // The dot is an unprompted claim that a message is waiting. A false positive
+  // sends the user to the gallery to be told the paste did not work, for
+  // something they never asked to paste. So it tests the header, which
+  // src/wire.js says exists to answer "is this ours" for exactly this scan.
+  assert.equal(looksLikeMessage('a shopping list'), true, 'the lenient predicate really is this lenient');
+  assert.equal(await withNav('granted', 'a shopping list'), false, 'granted, but not one of ours');
+
+  // Every failure is false, never a rejection. The caller draws a dot or does
+  // not; there is no error path a screen could act on. readText() rejects on a
+  // document that is not focused, which is common exactly when the tab is being
+  // restored -- the moment capture.js re-checks.
+  const had = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { permissions: { query: async () => ({ state: 'granted' }) },
+             clipboard: { readText: async () => { throw new DOMException('Document is not focused'); } } },
+    configurable: true,
+  });
+  assert.equal(await clipboardMayHavePayload(), false, 'a rejected read is false, not a throw');
+  Object.defineProperty(globalThis, 'navigator', { value: {}, configurable: true });
+  assert.equal(await clipboardMayHavePayload(), false, 'no clipboard API at all is false');
+  if (had) Object.defineProperty(globalThis, 'navigator', had); else delete globalThis.navigator;
+
+  // And the screen must not have kept a copy. The stub lived in capture.js and
+  // the question -- does this text look like ours -- belongs beside
+  // looksLikeMessage(), which is the app's one answer to it.
+  const { readFileSync } = await import('node:fs');
+  const capture = readFileSync(new URL('../app/screens/capture.js', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/function clipboardMayHavePayload/.test(capture), 'capture must import it, not define a second one');
+  assert.match(capture, /visibilitychange/, 'the dot has to be re-checked when you come back from copying something');
+});

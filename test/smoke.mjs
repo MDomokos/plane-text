@@ -91,6 +91,24 @@ for (const k of ['window','document','navigator','location','history','localStor
 }
 globalThis.self = window;
 
+// A granted clipboard holding one of our messages, so the capture screen's dot
+// has something to find. jsdom implements neither Permissions nor Clipboard, so
+// this is the whole API surface pipeline.js touches. Defined once, here, because
+// it has to be in place before any screen module is imported.
+{
+  const { encode } = await import(`${ROOT}/src/encode.js`);
+  const msg = encode(new Uint8ClampedArray(60 * 80 * 4).fill(200), 60, 80, { cols: 40, title: 'clip' }).message;
+  Object.defineProperty(globalThis, 'navigator', {
+    value: {
+      ...window.navigator,
+      permissions: { query: async () => ({ state: 'granted' }) },
+      clipboard: { readText: async () => msg },
+      mediaDevices: window.navigator.mediaDevices,
+    },
+    configurable: true,
+  });
+}
+
 const fail = [];
 const ok = (cond, msg) => { if (!cond) fail.push(msg); };
 
@@ -150,6 +168,32 @@ async function mount(id, params = {}) {
   ok(container.querySelectorAll('.sc-style').length >= 2, 'capture: style row rendered');
   ok(container.querySelector('.app-status'), 'capture: status line');
   ok(bottomBar.querySelectorAll('.pt-slot').length === 2, 'capture: two action slots');
+
+  // THE CLIPBOARD DOT, END TO END. Added 2026-08-09 with the implementation.
+  //
+  // planetext.test.js pins the policy -- never read on 'prompt', false forever
+  // where the permission name is unknown, the header rather than the lenient
+  // predicate. What it cannot reach is the wiring, and the wiring is where this
+  // feature spent its life broken: the rule existed in actionbar.css, the option
+  // existed in actionbar.js, and the only caller passed a hard-coded false.
+  //
+  // So this mounts the screen against a granted clipboard holding a real message
+  // and asserts that four pixels of gold actually arrive in the DOM, along with
+  // the accessible name that says what they mean -- an aria-hidden dot on its own
+  // tells a screen-reader user nothing.
+  //
+  // Two awaits, because refreshDot() is two promises deep: the permission query
+  // and the read. A single microtask flush lands between them.
+  // No "not yet" assertion here. mount() is awaited and the screen's own awaits
+  // flush the two promises on the way through, so the dot is usually already up
+  // by the time this line runs. Asserting its absence first would be asserting
+  // the scheduling of an implementation detail, which is a test that fails on a
+  // day nothing broke.
+  const openSlot = bottomBar.querySelector('.pt-slot');
+  await new Promise((r) => setTimeout(r, 0));
+  ok(openSlot.querySelector('.pt-dot'), 'capture: the dot lights when the clipboard holds one of ours');
+  ok(/clipboard/.test(openSlot.getAttribute('aria-label') || ''),
+     'capture: and the accessible name says so, since the dot is aria-hidden');
   ok(container.querySelector('.sc-notice') && !container.querySelector('.sc-notice').hidden, 'capture: no-camera notice shown');
   // band order must be chrome / stage / chrome, or the grid rows do not line up
   const kids = [...root.children].map((e) => e.className.split(' ')[0]);

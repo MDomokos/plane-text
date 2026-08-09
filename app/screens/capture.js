@@ -75,7 +75,9 @@
 // render loop runs.
 //
 // ---------------------------------------------------------------------------
-// STILL STUBBED: clipboardMayHavePayload(), for a platform reason.
+// NOTHING ON THIS SCREEN IS STUBBED ANY MORE. clipboardMayHavePayload() was the
+// last one and it is app/pipeline.js as of 2026-08-09; see the dot refresh at
+// the foot of the action bar below.
 
 import { defineScreen } from '../screen.js';
 import { register } from '../router.js';
@@ -87,22 +89,9 @@ import { currentWord, advanceWord } from '../words.js';
 import { openCamera, openStill, CameraError } from '../camera.js';
 import { startViewfinder } from '../viewfinder.js';
 import { clearAtlasCache } from '../atlas.js';
-import { setSubject, getSubject, clearSubject } from '../pipeline.js';
+import { setSubject, getSubject, clearSubject, clipboardMayHavePayload } from '../pipeline.js';
 import { attachStyleGesture, cycleStyle } from '../stylegesture.js';
 import { sizeSlider } from '../sizeslider.js';
-
-// Whether the clipboard is holding one of our messages, which is what puts the
-// gold dot on OPEN.
-//
-// STUBBED, and honestly it may have to stay that way on one platform. Reading
-// the clipboard without a user gesture needs the `clipboard-read` permission,
-// which Chromium grants and WebKit does not implement. So the real version is:
-// query the permission, read only if it is already granted, and on Safari
-// return false forever. The dot is an enhancement, since OPEN is always
-// tappable, so it is safe to ship as a constant until then.
-function clipboardMayHavePayload() {
-  return false;
-}
 
 // Per-visit resources that unmount() has to reach.
 //
@@ -556,7 +545,8 @@ export default register(defineScreen({
         : {
           label: 'OPEN',
           flex: 24,
-          dot: clipboardMayHavePayload(),
+          // No `dot` here. The answer is behind a permission query and arrives
+          // a task later; see refreshDot() below.
           onTap: () => ctx.navigate('paste'),
         },
       {
@@ -569,6 +559,44 @@ export default register(defineScreen({
         onTap: commit,
       },
     ], { signal: ctx.signal });
+
+    // --- the clipboard dot ------------------------------------------------
+    //
+    // The gold dot on OPEN, which says a message is already on the clipboard and
+    // this slot is the way to it. Implemented 2026-08-09, having been
+    // `return false` since the bar was written.
+    //
+    // The policy is in pipeline.js and it is most of the feature: never prompt,
+    // false forever on WebKit, and no polling. What is left here is WHEN to ask,
+    // and there are exactly two moments:
+    //
+    //   at mount, because you may have arrived with something already copied;
+    //
+    //   on `visibilitychange` to visible, which is the scenario itself. You
+    //   switched to WhatsApp, copied a message, and came back. Without this the
+    //   dot would be right only if the copy happened before the app was opened,
+    //   which is the less likely half of the case it exists for.
+    //
+    // Not in the import sub-mode: that slot is BACK, it does not lead to the
+    // gallery, and a dot on it would be pointing at nothing.
+    //
+    // Every path resolves rather than rejects, so there is no catch. The dot
+    // either appears or it does not, and a screen must not fail over a
+    // decoration -- which is also why setDot() ignores an out-of-range slot: the
+    // listener below can outlive the bar if a navigation lands between the
+    // event and the promise settling.
+    async function refreshDot() {
+      if (importing) return;
+      const on = await clipboardMayHavePayload();
+      if (ctx.signal.aborted) return;
+      bar.setDot(0, on);
+    }
+    if (!importing) {
+      refreshDot();
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') refreshDot();
+      }, { signal: ctx.signal });
+    }
 
     // --- the source -----------------------------------------------------
     //

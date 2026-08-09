@@ -6,7 +6,7 @@
 //   importScripts('app/precache-manifest.classic.js');
 //   self.PRECACHE.map(function (p) { return new URL(p, self.location).href; });
 
-self.PRECACHE_VERSION = 'pt-cc4426791862';
+self.PRECACHE_VERSION = 'pt-19b3facd5e91';
 
 self.PRECACHE = [
   'app/actionbar.css',

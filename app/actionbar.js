@@ -49,8 +49,13 @@ const SLOT_GAP = 8;
 //             'Capture' and the word is decorative.
 //   flex      share of the bar, in percent. Must total 100.
 //   hero      the primary. Exactly one, and it must be last.
-//   dot       a gold dot after the label. Used on OPEN when the clipboard
-//             holds a payload.
+//   dot       a gold dot after the label. Used on the slot that leads to the
+//             gallery, when the clipboard is holding one of our messages.
+//
+//             It is an INITIAL value, not the only way to set it. The answer
+//             arrives from an async permission query, so the bar is built
+//             without one and setDot() lights it a moment later. See the return
+//             value below.
 //   armAfter  ms before a hero accepts taps.
 
 function check(slots) {
@@ -79,6 +84,32 @@ function check(slots) {
       );
     }
   }
+}
+
+// Light or clear a slot's dot, and say so to a screen reader.
+//
+// THE ANNOUNCEMENT IS NOT OPTIONAL, and it is why this is a function rather than
+// two lines at each call site. The dot is 4px of colour with `aria-hidden` on
+// it, so on its own it tells a sighted user something and a screen-reader user
+// nothing. What it means -- there is a message waiting -- goes in the
+// accessible name, which is the only channel both users share.
+//
+// The name is restored rather than cleared, because a hero-less slot may have
+// had an `aria` of its own; the spec is the record of what it was.
+function setDot(b, on, spec) {
+  const had = b.querySelector('.pt-dot');
+  if (Boolean(on) === Boolean(had)) return;
+  if (on) {
+    const d = document.createElement('span');
+    d.className = 'pt-dot';
+    d.setAttribute('aria-hidden', 'true');
+    b.append(d);
+    b.setAttribute('aria-label', `${spec.aria || spec.label}, a message is on the clipboard`);
+    return;
+  }
+  had.remove();
+  if (spec.aria) b.setAttribute('aria-label', spec.aria);
+  else b.removeAttribute('aria-label');
 }
 
 function slotEl(spec, signal) {
@@ -110,12 +141,7 @@ function slotEl(spec, signal) {
     w.className = 'pt-slot-label';
     w.textContent = spec.label;
     b.append(w);
-    if (spec.dot) {
-      const d = document.createElement('span');
-      d.className = 'pt-dot';
-      d.setAttribute('aria-hidden', 'true');
-      b.append(d);
-    }
+    if (spec.dot) setDot(b, true, spec);
   }
 
   if (spec.armAfter) {
@@ -158,5 +184,24 @@ export function actionBar(host, slots, { signal = null } = {}) {
     });
   }
 
-  return { el: bar, hero, fire };
+  return {
+    el: bar,
+    hero,
+    fire,
+    // Set the dot on slot `i` after the fact. The clipboard answer is a promise
+    // -- it is behind a permission query -- so the bar cannot be built knowing
+    // it, and rebuilding the bar to add 4px of colour would discard the hero's
+    // arming timer and any focus the user had placed.
+    //
+    // Out of range is ignored rather than thrown, unlike everything check()
+    // does. A screen asking about a slot that is not there is a bug, but this is
+    // called from a `visibilitychange` handler that can outlive the bar it was
+    // registered against, and throwing there would take out the screen over a
+    // decoration.
+    setDot(i, on) {
+      const b = els[i];
+      if (!b || slots[i].hero) return;
+      setDot(b, on, slots[i]);
+    },
+  };
 }

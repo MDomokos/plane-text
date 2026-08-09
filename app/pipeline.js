@@ -111,3 +111,79 @@ export function looksLikeMessage(text) {
   const parsed = parseMessage(String(text || ''));
   return Boolean(parsed.magic || (parsed.grid && parsed.lines.length));
 }
+
+// Is one of our messages sitting on the clipboard right now?
+//
+// Implemented 2026-08-09. It was `return false;` in capture.js, with a paragraph
+// above it describing the real version, and the gold dot it feeds -- the only
+// gold the action bar permits on a non-hero slot -- had therefore never rendered
+// once. A rule in actionbar.css for an element no code path could produce is the
+// same shape as the PNG export that was a console.warn and the settings routes
+// nothing linked to.
+//
+// It is HERE rather than on the screen that draws the dot, because the question
+// is "is this ours", and this module is where that is answered. It does NOT use
+// looksLikeMessage() above, and the reason is at the return statement: the two
+// are asked at different moments and a false positive costs different things.
+//
+// ---------------------------------------------------------------------------
+// THE POLICY, WHICH IS MOST OF THE CODE.
+//
+// 1. NEVER PROMPT. Permissions.query() does not show UI, but clipboard.readText()
+//    on a 'prompt' state does -- and this runs at mount on the app's launch
+//    screen, with no user gesture behind it. A permission dialog nobody asked
+//    for, over a viewfinder, to decide whether to draw a 4px dot, is a trade
+//    nothing could justify. So `granted` is the only state that reads. On
+//    'prompt' and 'denied' the answer is false and the user is never told there
+//    was a question.
+//
+//    The paste path is unaffected and always was: PASTE on the gallery is a
+//    button, the read happens inside the user's own tap, and iOS shows its own
+//    paste confirmation there. That is the interaction this one must not
+//    duplicate.
+//
+// 2. FALSE FOREVER ON WEBKIT, and that is the correct outcome rather than a gap.
+//    Safari does not implement the `clipboard-read` permission name, so query()
+//    rejects with a TypeError and the catch returns false. Firefox is the same.
+//    The dot is a progressive enhancement -- the slot is always tappable and its
+//    label already says where it goes -- so a platform that cannot support it
+//    loses nothing it can see.
+//
+// 3. NO POLLING. The caller checks at mount and when the tab becomes visible
+//    again, which is exactly the moment the scenario happens: you switched to
+//    WhatsApp, copied a message, and came back. Reading the clipboard on a timer
+//    is surveillance of a system buffer that holds passwords, and it would be
+//    doing it to keep a dot up to date.
+//
+// Returns a promise, and every failure resolves false. There is no error path a
+// caller could do anything with: the dot either appears or it does not.
+export async function clipboardMayHavePayload() {
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.readText) return false;
+    if (!navigator.permissions || !navigator.permissions.query) return false;
+    // Throws on any engine that does not know the name. See 2 above.
+    const status = await navigator.permissions.query({ name: 'clipboard-read' });
+    if (status.state !== 'granted') return false;
+    // THE MAGIC, NOT looksLikeMessage(). They answer different questions and the
+    // difference is the whole value of the dot.
+    //
+    // looksLikeMessage() is deliberately lenient: it is asked AFTER the user has
+    // tapped PASTE, where the cost of a false positive is a better error message
+    // ("this image looks incomplete") instead of a worse one. It accepts
+    // anything that parses into a grid, and almost any text does -- a shopping
+    // list is a one-row grid.
+    //
+    // This runs unprompted and its output is a claim to the user that a message
+    // is waiting. A false positive here sends them to the gallery to be told the
+    // paste did not work, for something they never said they wanted to paste. So
+    // it wants the strict test, which is the header: src/wire.js says the magic
+    // exists to answer "is this ours" for exactly this scan (spec 5.5) and is
+    // cheap to find for the same reason.
+    return Boolean(parseMessage(String(await navigator.clipboard.readText() || '')).magic);
+  } catch {
+    // Unsupported name, revoked mid-flight, a document that is not focused --
+    // readText() rejects on that last one and it is the common case when the
+    // tab is being restored. One answer to all of them.
+    return false;
+  }
+}
