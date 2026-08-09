@@ -6,12 +6,14 @@
 //   importScripts('app/precache-manifest.classic.js');
 //   self.PRECACHE.map(function (p) { return new URL(p, self.location).href; });
 
-self.PRECACHE_VERSION = 'pt-53915b62074e';
+self.PRECACHE_VERSION = 'pt-cc4426791862';
 
 self.PRECACHE = [
   'app/actionbar.css',
   'app/actionbar.js',
   'app/art.js',
+  'app/artefact.css',
+  'app/artefact.js',
   'app/atlas.js',
   'app/camera.js',
   'app/glyphgl.js',

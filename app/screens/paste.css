@@ -153,6 +153,105 @@
 }
 .sc-field[hidden] { display: none; }
 
+/* The action row ---------------------------------------------------------- */
+
+/* ONE RESERVED ROW WITH TWO POSSIBLE OCCUPANTS: the verbs, or the last paste
+ * error. See the note in paste.js for why they share.
+ *
+ * `flex: none` and a --pt-tap floor, and the floor is the load-bearing half.
+ * The strip below is `flex: 1 1 auto` now and fills whatever the band has left,
+ * so any row that changes height changes the size of every thumbnail. Reserving
+ * this one means the strip is 102px whether you are looking at a picture, an
+ * error, or an empty gallery.
+ *
+ * A three-line error is the one case that exceeds the reservation, and then this
+ * row grows and the strip gives up the difference. That is the right way round:
+ * the error stays readable and the thumbnails lose ten pixels for as long as it
+ * is on screen. Measured at 390px, both of spec 8's strings wrap to two lines,
+ * so it is a failure mode rather than the common case. */
+.sc-act {
+  flex: none;
+  min-height: var(--pt-tap);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin-inline: auto;
+  padding-inline: var(--pt-space-4);
+}
+
+/* Three equal slots. Equal because they are three things you can do to one
+ * picture and nothing ranks them -- the app's one accent is the hero PASTE
+ * button in the action bar below, and a second gold control on this screen
+ * would break the rule tokens.css states most often. */
+.sc-actions {
+  display: flex;
+  align-items: stretch;
+  gap: var(--pt-space-2);
+  height: var(--pt-tap);
+}
+.sc-actions[hidden] { display: none; }
+
+/* Vacant when there is no picture on the stage: an empty gallery, or the paste
+ * fallback field covering it. `visibility` rather than `hidden`, because
+ * `display: none` would hand this row's 44px to the strip and resize every
+ * thumbnail in it the moment the last entry was deleted. It also takes the
+ * buttons out of the tab order and the accessibility tree, which is the half of
+ * `hidden` that was doing real work. */
+.sc-actions.is-vacant { visibility: hidden; }
+
+/* The same silhouette as an action-bar slot -- hairline, 2px radius, 12px
+ * tracked mono -- one step quieter, because these are secondary to the three
+ * doors along the bottom and sit against the picture rather than under it.
+ *
+ * .pt-del joins this row as its third control and is styled by thumbstrip.css,
+ * not here: it is the strip's control, it carries the arming, and a screen only
+ * owns what it builds. `.pt-del.is-fill` is what makes it match. */
+.sc-act-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-dim);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track);
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: box-shadow var(--pt-dur-base) ease, color var(--pt-dur-base) ease;
+}
+.sc-act-btn:hover { box-shadow: inset 0 0 0 1px var(--pt-line-strong); color: var(--pt-ink); }
+
+/* The slot DELETE is built into. It holds the third of the row whether or not
+ * the button inside it is showing -- thumbstrip hides its own control when
+ * nothing is selected -- so SHARE and SAVE do not widen and re-centre their
+ * labels the moment the gallery empties. */
+.sc-act-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+/* The name in the top band ------------------------------------------------- */
+
+/* Clamped to the art like every other piece of chrome. It was inside
+ * .app-chrome-row, which did this for it; that row went with the delete control
+ * it existed to balance. See paste.js. */
+.sc-open .app-name {
+  width: 100%;
+  max-width: var(--pt-art-w);
+  margin-inline: auto;
+  padding-inline: var(--pt-space-4);
+}
+
 /* Errors ------------------------------------------------------------------- */
 
 /* Its own element rather than the status line, because .app-status is one
@@ -164,10 +263,6 @@
 .sc-problem {
   flex: none;
   margin: 0;
-  width: 100%;
-  max-width: var(--pt-art-w);
-  margin-inline: auto;
-  padding: 0 var(--pt-space-4);
   text-align: center;
   color: var(--pt-error);
   font-size: var(--pt-size-xs);

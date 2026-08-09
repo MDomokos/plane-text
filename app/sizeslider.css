@@ -80,6 +80,27 @@
 }
 .pt-slider[hidden] { display: none; }
 
+/* VACANT, NOT GONE. Added 2026-08-09 with the strip that fills the band.
+ *
+ * The viewer removes this control for a received message: there are no source
+ * pixels to re-encode, so there is nothing to decide (compose.js). It used to be
+ * removed with `hidden`, which is `display: none`, which took the row out of the
+ * flex column -- and thumbstrip.css used to absorb that with `margin-top: auto`
+ * so the strip below did not slide 48px up the band when you swiped onto
+ * somebody else's picture.
+ *
+ * The strip is `flex: 1 1 auto` now and fills what the band has left, so a row
+ * that comes and goes no longer MOVES the strip, it RESIZES every thumbnail in
+ * it. Thumbnails that grow and shrink as you swipe between pictures are a worse
+ * version of the bug the auto margin fixed, so the row stays in the layout and
+ * only its contents stop being there.
+ *
+ * `visibility: hidden` rather than `opacity: 0`, because it also takes the input
+ * out of the tab order and out of the accessibility tree, which is the half of
+ * `hidden` that was doing real work. Children inherit it, so the input and the
+ * ticks go with the wrapper and no second rule is needed. */
+.pt-slider.is-vacant { visibility: hidden; }
+
 /* Hidden for a received message: it is already encoded and there is nothing to
  * choose. Absent rather than disabled, since a disabled control is
  * low-contrast, shows no tooltip on touch, and implies it could be enabled.

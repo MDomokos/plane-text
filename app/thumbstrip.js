@@ -77,6 +77,12 @@
 //                   strip with no delete at all. Nothing is positioned by the
 //                   component: it appends one button and the host decides where
 //                   that lands, exactly as the strip itself does.
+//     deleteFill    the DELETE button is one of several equal controls in a row
+//                   rather than a fixed column beside a centred name. See
+//                   `.pt-del.is-fill` in thumbstrip.css: it releases the 88px
+//                   width, which is a measurement taken against the title band
+//                   and means nothing in an action row. The viewer passes
+//                   nothing; the gallery passes true.
 //     onDelete      (entry, { index }) -- the SECOND tap only. The first arms.
 //                   The entry is already out of recents and the strip has
 //                   already redrawn by the time this fires, so a caller only
@@ -119,6 +125,7 @@ export function thumbStrip(host, {
   pickVerb = 'Open',
   onPick = null,
   deleteHost = null,
+  deleteFill = false,
   onDelete = null,
   say = null,
   signal = null,
@@ -149,6 +156,12 @@ export function thumbStrip(host, {
   let pass = null;
   let frames = [];
 
+  // Where every thumbnail's art was painted, kept so the strip can repaint
+  // WITHOUT rebuilding. See the observer below.
+  let cards = [];
+  let repaintFrame = 0;
+  let paintedAt = 0;
+
   // --- delete ------------------------------------------------------------
   //
   // One button, one target: whatever `current` names. Built once and kept, not
@@ -164,7 +177,7 @@ export function thumbStrip(host, {
   const del = deleteHost ? document.createElement('button') : null;
   if (del) {
     del.type = 'button';
-    del.className = 'pt-del';
+    del.className = deleteFill ? 'pt-del is-fill' : 'pt-del';
     del.hidden = true;
     del.textContent = 'DELETE';
     deleteHost.append(del);
@@ -243,11 +256,74 @@ export function thumbStrip(host, {
     onDelete?.(entry, { index: at });
   }, { signal });
 
+  // --- repaint on resize ---------------------------------------------------
+  //
+  // NEW, AND REQUIRED BY THE CARD SIZING. Added 2026-08-09 with `flex: 1 1 auto`
+  // on .pt-strip.
+  //
+  // A thumbnail used to be --pt-thumb-w x --pt-thumb-h, a constant, so the box
+  // paintThumb() measured could only change when the app was reloaded. The card
+  // now fills the row and the row is what the band has left, so the box changes
+  // on a rotation, on a foldable, and on any viewport change that moves
+  // --pt-art-w. Without this the art keeps the font size it was fitted at and
+  // either overflows its card or sits in the corner of it.
+  //
+  // Guarded on the height rather than fired on every delivery. ResizeObserver
+  // always delivers an initial observation, and at mount the per-thumbnail rAF
+  // paints below have already done the work; repainting again in the same task
+  // would double the cost of every mount for nothing. The rAF path stays because
+  // it is what paints where ResizeObserver is unavailable.
+  //
+  // rAF-coalesced, because a rotation delivers a burst.
+  function repaint() {
+    const s = state();
+    for (const c of cards) paintThumb(c.art, c.message, c.box, s);
+  }
+
+  const ro = typeof ResizeObserver === 'function'
+    ? new ResizeObserver((obs) => {
+      // THE BORDER BOX, NOT THE CONTENT BOX, and this is a loop rather than a
+      // preference.
+      //
+      // This strip is `overflow-x: auto`. On a platform with classic scrollbars
+      // -- a desktop, and Firefox with `scrollbar-width: thin` -- a horizontal
+      // bar eats its height out of the CONTENT box. So publishing a height from
+      // contentRect makes the cards wider, wider cards overflow, the bar
+      // appears, the content box shrinks, the cards get narrower, the overflow
+      // goes away, the bar disappears, and the observer is called again with the
+      // height it started from. That oscillates for as long as the screen is
+      // open, at one rAF per lap, and only on a machine nobody tests the phone
+      // app on.
+      //
+      // The border box is set by the flex line above it and a scrollbar cannot
+      // move it, so it is a fixed point. The cost is that on those platforms the
+      // card is a scrollbar taller than the visible strip and the last pixels of
+      // the selection underline are clipped -- which is exactly the trade
+      // thumbstrip.css already records at the foot of its height budget, and
+      // unchanged in kind.
+      const e = obs[0];
+      const h = Math.round(e?.borderBoxSize?.[0]?.blockSize ?? e?.contentRect?.height ?? 0);
+      if (!h || h === paintedAt) return;
+      paintedAt = h;
+      // Publish it before repainting. This is the number every thumbnail is
+      // sized from -- see --pt-thumb-box at the top of thumbstrip.css for why
+      // the card cannot work it out in CSS -- so the cards must be their new
+      // width before paintThumb() measures the box inside them.
+      el.style.setProperty('--pt-thumb-box', `${h}px`);
+      cancelAnimationFrame(repaintFrame);
+      repaintFrame = requestAnimationFrame(repaint);
+    })
+    : null;
+  ro?.observe(el);
+
   signal?.addEventListener('abort', () => {
     clearTimeout(armTimer);
     pass?.abort();
+    ro?.disconnect();
+    cancelAnimationFrame(repaintFrame);
     for (const id of frames) cancelAnimationFrame(id);
     frames = [];
+    cards = [];
   }, { once: true });
 
   // --- selection ---------------------------------------------------------
@@ -318,6 +394,7 @@ export function thumbStrip(host, {
     current = next;
     entries = recents.list();
     buttons = [];
+    cards = [];
     el.replaceChildren();
 
     const asTabs = current !== null && entries.length > 0;
@@ -371,6 +448,7 @@ export function thumbStrip(host, {
 
       el.append(b);
       buttons.push(b);
+      cards.push({ art, box, message: entry.message });
 
       // Draw after layout, so the box has a measured size to fit into. The
       // handle is kept so a re-render or an unmount can cancel it: a thumbnail

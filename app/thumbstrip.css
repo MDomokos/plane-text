@@ -1,75 +1,131 @@
 /* Plane Text: the recents strip. See thumbstrip.js for what the component owns.
  *
  * ===========================================================================
- * WHERE IT SITS, AND WHY THAT IS ONE DECLARATION.
+ * WHERE IT SITS, AND HOW BIG IT IS. Rewritten 2026-08-09.
  *
- * `margin-top: auto` on .pt-strip. Both screens put the strip in a flex column,
- * so an auto top margin eats the column's free space and pins the strip to the
- * bottom of it. Neither screen names an offset, which is what stops the two
- * from drifting apart the way the two strips did.
+ * BOTH ARE ONE DECLARATION: `flex: 1 1 auto` on .pt-strip. It is the last row
+ * before the status line in both screens' .app-chrome-bot, so growing to fill
+ * the column pins it to the bottom exactly as the `margin-top: auto` it replaces
+ * did, and it also spends what the auto margin left as black.
  *
- * It also fixes a case inside the viewer that had nothing to do with the other
- * screen. .app-chrome-bot is `justify-content: flex-start`, and the size slider
- * is ABSENT rather than disabled for a received message (compose.js: there is
- * nothing to decide about a message that is already encoded). So the strip and
- * the status line were dragged 48px up the band -- the slider's 44 plus a 4px
- * gap -- the moment you swiped from your own photo onto someone else's. The
- * strip moved between two pictures on the same screen.
+ * WHAT THE AUTO MARGIN LEFT. --pt-chrome-bot is a fixed 176px on every picture
+ * screen, sized by its tallest consumer so that the stage -- and therefore the
+ * picture -- is the same box everywhere (tokens.css). The viewer fills it. The
+ * others did not:
+ *
+ *   compose  fit 21 + chars 18 + slider 44 + strip 51 + status 18   173 of 176
+ *   capture  readout 26 + slider 44 + status 18                     100 of 176
+ *   paste    strip 51 + status 18                                    77 of 176
+ *
+ * So the gallery had 99px of black between its picture and its thumbnails --
+ * more than the strip itself -- and the screen named after the gallery gave it a
+ * fifth of the room it had. That was the whole finding.
+ *
+ * WHAT EACH SCREEN RESOLVES TO NOW. The strip takes the band minus the rows
+ * above it, and the card takes the strip minus 3px of padding and underline:
+ *
+ *   compose  band - (fit 21 + chars 18 + slider 44 + status 18 + gaps)  = 55
+ *            card 52 x 39
+ *   paste    band - (actions 44 + status 18 + gaps)                     = 102
+ *            card 99 x 74
+ *
+ * Two sizes from one rule. That is NOT the drift this component was built to
+ * end: that was two DECLARATIONS disagreeing -- 30x40 here and 46x60 there, a
+ * name on one and not the other, two cap notes in two colours. One declaration
+ * resolving against two different amounts of free space is what --pt-art-w
+ * already does against two different viewports.
+ *
+ * WHAT THIS ASKS OF A SCREEN, and both now honour it: the rows above the strip
+ * must not appear and disappear. A row that comes and goes no longer MOVES the
+ * strip, it RESIZES every thumbnail in it, and thumbnails that change size as
+ * you swipe between pictures are a worse bug than the void this fixes. Two
+ * places had to change for that:
+ *
+ *   The viewer's size slider is absent for a received message -- there are no
+ *   source pixels, so there is nothing to decide. It goes VACANT now rather than
+ *   away; see `.pt-slider.is-vacant` in sizeslider.css.
+ *
+ *   The gallery's paste error and its action row share one reserved --pt-tap
+ *   row, because they are alternatives in meaning as well as in space. See
+ *   `.sc-act` in paste.css.
  *
  * ===========================================================================
- * THE HEIGHT BUDGET, AND WHY THE NAME IS INSIDE THE CARD.
+ * WHY THE NAME IS INSIDE THE CARD.
  *
- * The name plate is the one thing here that looks arbitrary and is not. The
- * viewer's band is --pt-chrome-bot, a fixed 176px reserved so the picture does
- * not move (tokens.css), and it was already full. Measured, top to bottom:
+ * Unchanged, and it was decided against the tightest case, which is still the
+ * viewer at 55px of strip. A caption BELOW the card costs 15px (2 margin + 12
+ * line + 1 for the underline's clearance), which at 3:4 would take the viewer's
+ * card from 52 x 39 down to 37 x 28 -- smaller than either of the strips this
+ * component replaced ever drew. So the name is inside and the ART gives up the
+ * rows instead:
  *
- *   band padding-top    4
- *   .sc-view-fit       21   (--pt-size-sm 14 x line-height 1.5)
- *   gap                 4
- *   .sc-view-chars     18
- *   gap                 4
- *   .pt-slider         44   (--pt-tap; the hit area IS the control)
- *   gap                 4
- *   .pt-strip          51
- *   gap                 4
- *   .app-status        18
- *                     ---
- *                     172 of 176
+ *   .pt-thumb-card   the strip's height, less this button's 2px of padding and
+ *                    1px of underline
+ *   .pt-thumb-name   a --pt-size-2xs line at --pt-line-tight, 12px
+ *   .pt-thumb-box    everything left, which is what paintThumb() measures
  *
- * A caption BELOW a 48px card costs 15px (2 margin + 12 line + 1 for the
- * underline's clearance) and there are 4 spare, so the card would have had to
- * come down to 36 tall and, at 3:4, to 27 wide. That is smaller than either
- * strip has ever drawn.
+ * The visible picture is the same size either way, because a 3:4 grid in a
+ * slightly shorter box draws a slightly shorter grid. What the plate-inside
+ * choice buys is the tap target and the 3:4 outer card.
  *
- * (The original version of this paragraph had a second reason: 27 wide re-opened
- * the hit-box bug the corner delete button was shaped around. That control is
- * gone as of 2026-08-09 -- see the delete section below -- so the argument is
- * down to one reason. It is still the reason.)
+ * The name stays at --pt-size-2xs on both screens even though the gallery's card
+ * is now 74px wide and could carry 12px type. Scaling it would be a second
+ * declaration keyed on a size, which is the thing this file is trying not to
+ * have. It is a label on a picture, not a heading.
  *
- * So the name is inside the card and the ART gives up the rows instead:
- *
- *   .pt-thumb-card     48 = .pt-thumb-box 35 + 1px divider + .pt-thumb-name 12
- *   .pt-thumb          51 = card 48 + 2px padding + 1px underline
- *
- * The visible picture ends up the same size either way -- a 3:4 grid in a 36x35
- * box draws 26x35, and in a 27x36 box it draws 27x36 -- so the choice costs the
- * art nothing and buys back the 36px tap target, the 3:4 outer card, and
- * --pt-thumb-w / --pt-thumb-h at the values tokens.css already argued for.
- *
- * The 4px of slack is the scrollbar's. On a platform with overlay scrollbars
- * (every phone, and macOS by default) the bar takes no layout space at all. On
- * a classic-scrollbar desktop the strip's used height grows by the bar, which
- * is why the bar below is 2px rather than the 6px it replaces. Firefox's
- * `scrollbar-width: thin` is wider than either and the band clips the last few
- * pixels of the underline there. That is unchanged in kind from the 6px bar and
- * it is the reason 2px is a ceiling rather than a preference.
+ * THE SCROLLBAR'S PIXELS. On a platform with overlay scrollbars (every phone,
+ * and macOS by default) the bar takes no layout space. On a classic-scrollbar
+ * desktop the strip's used height grows by the bar, which is why the bar below
+ * is 2px rather than the 6px it replaces. Firefox's `scrollbar-width: thin` is
+ * wider than either and the band clips the last few pixels of the underline
+ * there. That is unchanged in kind and it is why 2px is a ceiling rather than a
+ * preference.
  * ========================================================================== */
 
+/* IT FILLS THE BAND NOW. Changed 2026-08-09.
+ *
+ * `flex: none; margin-top: auto` before this, which pinned a fixed 51px strip to
+ * the bottom of the band and left the slack above it as black. On the gallery
+ * that slack was 99px -- more than the strip itself -- so the screen named after
+ * the gallery gave it a fifth of the room it had.
+ *
+ * `flex: 1 1 auto` does the same job and spends the slack: the strip is still
+ * the last thing before the status line, so it is still bottom-anchored and
+ * still lands in the same place on both screens, and it now takes whatever the
+ * band has left. See --pt-thumb-min-h in tokens.css for the resolved sizes.
+ *
+ * WHAT THIS REQUIRES OF A SCREEN, and both now honour it: the rows above the
+ * strip must not appear and disappear. A row that comes and goes changes the
+ * strip's height, which changes every thumbnail's size, and thumbnails that
+ * resize as you swipe between pictures are worse than the void this replaces.
+ * The viewer's size slider is the case -- absent for a received message -- and
+ * it now goes vacant rather than away (sizeslider.js setHidden). The gallery's
+ * error line shares one reserved row with its action row for the same reason.
+ *
+ * `align-items: stretch`, so a thumbnail is as tall as the row it is in. It was
+ * flex-start against a fixed card height. */
 .pt-strip {
-  flex: none;
-  margin-top: auto;   /* see the top of this file. Load-bearing. */
+  flex: 1 1 auto;
+  min-height: 0;
+
+  /* The measured height of this strip, published by thumbstrip.js from a
+   * ResizeObserver, and the one number every thumbnail below is sized from.
+   *
+   * MEASURED AND PUBLISHED, NOT DERIVED IN CSS. The obvious version of this rule
+   * is `aspect-ratio: 3 / 4` on the card with `height: 100%`, and it does not
+   * work: the button is a flex item whose width is content-based, and a card's
+   * aspect-ratio contributes its INTRINSIC height to that intrinsic width, not
+   * the height it was stretched to. The cards would size themselves from the
+   * name plate and come out about 9px wide.
+   *
+   * This is the same move art.js makes with publishArtWidth(): when a layout
+   * needs a number that only layout knows, one observer measures it once and
+   * writes it where the rules can read it. The fallback is the floor, so the
+   * first frame -- before the observer has delivered -- draws the size the strip
+   * drew for its whole life rather than nothing. */
+  --pt-thumb-box: var(--pt-thumb-min-h);
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: var(--pt-space-2);
 
   /* Clamp to the picture, not the window, exactly as .pt-actionbar does. On
@@ -137,10 +193,25 @@
  * position existed solely to anchor the absolutely positioned corner delete
  * button. With that button gone the wrapper had one job left, which the button
  * can do itself. */
+/* A column, so the card fills the button and the button fills the row.
+ *
+ * The width is 3:4 of the CARD's height, and the card is the strip minus this
+ * button's own 2px of padding and 1px of underline. 3:4 because everything this
+ * app renders is 3:4 (CAPTURE_ASPECT), and because the old 46 x 60 was not --
+ * 46 x 4/3 is 61.3, so one of the two strips this component replaced squeezed
+ * its pictures by a pixel and a bit and nobody had decided to.
+ *
+ * One declaration, two screens, no per-screen number: the viewer's band leaves
+ * 55px here and the gallery's leaves 102, so the same rule draws a 39 x 52 card
+ * on one and a 74 x 99 card on the other. That is not the drift this component
+ * was built to end -- that was two DECLARATIONS disagreeing. This is one
+ * declaration resolving against two different amounts of free space, the way
+ * --pt-art-w already resolves against two different viewports. */
 .pt-thumb {
   flex: none;
-  display: block;
-  width: var(--pt-thumb-w);
+  display: flex;
+  flex-direction: column;
+  width: calc((var(--pt-thumb-box) - 3px) * 0.75);
   padding: 0 0 2px;
   background: none;
   border: 0;
@@ -166,10 +237,15 @@
  * three, so a thumbnail is one thing rather than a picture with a caption
  * floating under it. See the height arithmetic at the top of this file for why
  * the name is inside rather than below. */
+/* The card is still the whole object -- picture, divider, name -- inside one
+ * hairline, so a thumbnail is one thing rather than a picture with a caption
+ * floating under it. It takes the button's height; the button took its width
+ * from that height. See the rule above. */
 .pt-thumb-card {
   display: flex;
   flex-direction: column;
-  height: var(--pt-thumb-h);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
   border-radius: var(--pt-radius);
   box-shadow: inset 0 0 0 1px var(--pt-line);
@@ -198,18 +274,25 @@
   font-variant-ligatures: none;
 }
 
-/* The name identifies; the picture does not. At --pt-thumb-w a grid of ramp
- * glyphs reads as texture (recents.js has always said so), and this label is
- * how you know which entry it is.
+/* The name identifies; the picture does not -- at the size the VIEWER's strip
+ * resolves to, a grid of ramp glyphs reads as texture and the word is how you
+ * know which entry it is. recents.js has always said so.
+ *
+ * That is less true on the gallery, where the card is about twice the linear
+ * size and you can genuinely recognise a photograph in it. The label stays
+ * anyway, and at the same size on both: scaling it would be a second
+ * declaration keyed on how tall the strip turned out, which is precisely the
+ * per-screen number this file spent its rewrite removing. It is a label on a
+ * picture, not a heading.
  *
  * --pt-size-2xs exists for this and nothing else. It was `font-size: 10px`, the
  * only off-scale size in the app, and it is deliberate rather than a mistake: a
- * card this size cannot carry 12px type, so it became a token instead of being
- * rounded up into one that does not fit.
+ * card at the viewer's size cannot carry 12px type, so it became a token
+ * instead of being rounded up into one that does not fit.
  *
- * --pt-line-tight rather than the body's 1.5, which would make the plate 15px
- * and put the budget above over 176. 1.2 is 12px, which clears the descenders
- * in the word list. */
+ * --pt-line-tight rather than the body's 1.5. 1.2 is 12px, which clears the
+ * descenders in the word list and keeps the plate at the height the budget at
+ * the top of this file counts. */
 .pt-thumb-name {
   flex: none;
   border-top: 1px solid var(--pt-divider);
@@ -317,6 +400,27 @@
   box-shadow: inset 0 0 0 1px var(--pt-error);
   color: var(--pt-error);
 }
+
+/* IN A ROW OF ACTIONS RATHER THAN A CORNER OF THE TITLE BAND. Added 2026-08-09
+ * with the gallery's SHARE / SAVE / DELETE row.
+ *
+ * The 88px fixed width above is a measurement taken against .app-chrome-row,
+ * where the control sits in a fixed grid column beside a centred name and must
+ * hold the longer of DELETE and TAP AGAIN without shoving the name sideways.
+ * None of that is true in an action row: there is no name to protect, the
+ * neighbours are two buttons of the same kind, and a third of the row is wider
+ * than 88 on every viewport the app renders on.
+ *
+ * So the fixed width is released and the hairline is added, because here the
+ * control is one of three and the other two have one. It stays quiet -- faint
+ * ink, no fill -- which is the half of the old treatment that was about the
+ * ACTION rather than about the corner it lived in. */
+.pt-del.is-fill {
+  flex: 1 1 0;
+  min-width: 0;
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+}
+.pt-del.is-fill[data-armed="1"] { box-shadow: inset 0 0 0 1px var(--pt-error); }
 
 /* The cap note and the empty state ----------------------------------------- */
 

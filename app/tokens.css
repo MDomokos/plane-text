@@ -290,8 +290,42 @@
    * either way, because a 3:4 grid draws 26x35 in the first box and 27x36 in
    * the second. What the outer 36 x 48 buys is the tap target. The budget is
    * written out in full at the top of app/thumbstrip.css. */
-  --pt-thumb-w: 36px;
-  --pt-thumb-h: 48px;
+  /* -----------------------------------------------------------------------
+   * IT IS A FLOOR NOW, NOT A SIZE. Changed 2026-08-09, on the owner's
+   * instruction: "grow the carousel images universally to the available space.
+   * Do not change the size of the viewport / full image. That always stays the
+   * same."
+   *
+   * Everything above this line is still true about WHY one number served two
+   * screens, and it is exactly why the answer is one RULE rather than two
+   * numbers. The rule is in thumbstrip.css: the card fills the height of the
+   * row it is in, at 3:4, and the row is whatever the band has left after the
+   * screen's other chrome. So the strip is as large as it can be on every
+   * screen without any screen naming a pixel, and the two bands stay 44 and 176
+   * -- the stage, and therefore the picture, does not move by a pixel on any
+   * screen. That was the instruction's second half and it is the constraint
+   * that made a fixed token impossible: the viewer's band has 3px spare and the
+   * gallery's has 99, so one number that fits both is the smaller of the two,
+   * which is the number we already had.
+   *
+   * What each screen resolves to, from its own band budget:
+   *
+   *   compose  4 pad + fit 21 + chars 18 + slider 44 + status 18 + 4 gaps
+   *            = 121, so the strip row is 55 and the card is 52 x 39.
+   *   paste    4 pad + actions 44 + status 18 + 3 gaps = 74, so the strip row
+   *            is 102 and the card is 99 x 74.
+   *
+   * The gallery's card is therefore about twice the linear size of the
+   * viewer's, which is not drift: it is one declaration resolving against two
+   * different amounts of free space, the same way --pt-art-w resolves against
+   * two different viewports. A drift bug is two declarations that disagree.
+   *
+   * THE FLOOR IS WHAT IS LEFT. A flex row can be squeezed to nothing, and a
+   * strip that vanishes because a landscape viewport left its band 12px is a
+   * feature that silently stops existing. 48 is the height the strip drew for
+   * its whole life, so it is the smallest size known to work; below it the band
+   * clips rather than the strip disappearing, which is the visible failure. */
+  --pt-thumb-min-h: 48px;
 
   /* The status line's reserved height. Added 2026-08-09 with the shared strip.
    *

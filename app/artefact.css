@@ -1,0 +1,104 @@
+/* Plane Text: the save sheet. See artefact.js for what the module owns.
+ *
+ * These rules were the "Save sheet" block at the foot of compose.css until
+ * 2026-08-09, when the gallery got a SAVE of its own. They moved for the same
+ * reason the slider's rules moved out of that file and the strip's did before
+ * them: a control used by two screens that is styled by one screen's stylesheet
+ * works only because index.html links every sheet on every route, and the first
+ * person to stop doing that breaks the OTHER screen.
+ *
+ * The class names keep their `sc-` prefix rather than becoming `pt-`. Renaming
+ * them would touch every selector here and every string in artefact.js to record
+ * a fact -- that this is a shared component now -- which the file's location and
+ * this paragraph already record. `.pt-slider` and `.pt-strip` earned their
+ * prefixes by being built as components; these were extracted, and the rename is
+ * a diff nobody can review against a screenshot.
+ */
+
+/* Flush, not floating. It sits on the same black plane and dims what is behind
+ * it: no elevation anywhere in this app, surfaces separated by a hairline.
+ *
+ * KEYED ON `.is-dimmed` ALONE, not on `.sc-view.is-dimmed`. It was the latter,
+ * which meant the rule described the viewer rather than the sheet, and the
+ * gallery -- `.sc-open` -- opened a save sheet over a picture at full
+ * brightness with the strip behind it still live and tappable. The child
+ * selectors are the shell's three band classes, which is what makes this work on
+ * any screen that builds .app-frame and nothing else. */
+.is-dimmed > .app-chrome-top,
+.is-dimmed > .app-stage,
+.is-dimmed > .app-chrome-bot {
+  filter: brightness(0.3);
+  pointer-events: none;
+  transition: filter var(--pt-dur-base) ease;
+}
+
+/* The panel itself spans the frame, because a surface that stops short of the
+ * edge reads as a floating card and there is no elevation in this app. Its
+ * contents clamp to the art like everything else. */
+.sc-sheet-head,
+.sc-sheet-row { max-width: var(--pt-art-w); margin-inline: auto; }
+
+.sc-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--pt-bg);
+  border-top: 1px solid var(--pt-line-strong);
+  padding: var(--pt-space-4) 0 var(--pt-space-4);
+}
+
+.sc-sheet-head {
+  margin: 0 0 var(--pt-space-3);
+  padding: 0 var(--pt-space-4);
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track-wide);
+  color: var(--pt-ink-faint);
+}
+
+.sc-sheet-row {
+  width: 100%;
+  min-height: var(--pt-tap);
+  display: flex;
+  align-items: center;
+  gap: var(--pt-space-3);
+  padding: var(--pt-space-3) var(--pt-space-4);
+
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--pt-divider);
+  border-radius: 0;   /* single-sided border, so no radius */
+  color: var(--pt-ink-dim);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.sc-sheet-row:hover { color: var(--pt-ink); }
+
+.sc-sheet-ext {
+  flex: none;
+  width: 44px;
+  color: var(--pt-accent);
+  letter-spacing: var(--pt-track);
+}
+.sc-sheet-blurb { flex: 1; line-height: var(--pt-line-body); }
+.sc-sheet-size { flex: none; color: var(--pt-ink-faint); white-space: nowrap; }
+
+.sc-sheet-cancel {
+  display: block;
+  width: calc(100% - var(--pt-space-4) * 2);
+  max-width: calc(var(--pt-art-w) - var(--pt-space-4) * 2);
+  min-height: var(--pt-tap);
+  margin: var(--pt-space-4) auto 0;
+  background: none;
+  border: 0;
+  box-shadow: inset 0 0 0 1px var(--pt-line);
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-dim);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track);
+  cursor: pointer;
+}
+.sc-sheet-cancel:hover { box-shadow: inset 0 0 0 1px var(--pt-line-strong); }

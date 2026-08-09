@@ -2257,11 +2257,40 @@ test('the recents strip is built once, in one module, and is not gold', async ()
     assert.match(js, /deleteHost:/, `${screen} must get its delete control from the component`);
     assert.ok(!/recents\.remove/.test(js), `${screen} must not delete an entry behind the component's back`);
   }
-  assert.match(strip, /--pt-thumb-w/);
-  assert.match(strip, /--pt-thumb-h/);
-  // Same place on every screen, and it is one declaration rather than a number
-  // each screen repeats. Both columns pin it to their own bottom.
-  assert.match(strip, /margin-top:\s*auto/, 'the strip pins itself to the bottom of its column');
+  // ONE RULE, NOT ONE NUMBER. Changed 2026-08-09, when the owner asked for the
+  // gallery's thumbnails to fill the space its band was wasting: "grow the
+  // carousel images universally to the available space. Do not change the size
+  // of the viewport / full image. That always stays the same."
+  //
+  // Those two sentences rule out a fixed --pt-thumb-w / --pt-thumb-h, and the
+  // arithmetic is why. Both bands are 176px and both are sized so the stage --
+  // and therefore the picture -- is identical on every screen, which is the
+  // second sentence. The viewer's band has 3px spare and the gallery's had 99.
+  // A single fixed size that fits both is therefore the smaller of the two,
+  // which is the size we already had, so a fixed token cannot satisfy the first
+  // sentence without breaking the second.
+  //
+  // So the size is a rule -- the card fills the strip, the strip fills the band
+  // -- and it resolves to 52 x 39 on the viewer and 99 x 74 on the gallery. Two
+  // sizes from one declaration is not the drift this component exists to
+  // prevent; that was two declarations disagreeing.
+  assert.ok(!/--pt-thumb-w|--pt-thumb-h\b/.test(decomment(strip)),
+    'the thumbnail must not carry a fixed size again: it fills the band, and the two bands differ');
+  assert.match(strip, /flex:\s*1 1 auto/, 'the strip fills its column rather than pinning a fixed height to the bottom');
+  assert.match(strip, /--pt-thumb-box/, 'the card is sized from the strip\'s measured height');
+  assert.match(read('app/thumbstrip.js'), /setProperty\('--pt-thumb-box'/,
+    'and that height is published by the observer, because CSS cannot derive it');
+
+  // WHAT THE RULE COSTS, and it is the assertion most likely to save someone.
+  // A strip that fills the band means any row ABOVE it that appears and
+  // disappears resizes every thumbnail instead of moving the strip. Two rows in
+  // the app could do that and both were changed to hold their place:
+  const slider = read('app/sizeslider.js');
+  assert.match(slider, /is-vacant/, 'the size slider must go vacant, not absent: it shares a band with the strip');
+  assert.ok(!/el\.hidden\s*=/.test(decomment(slider)),
+    'setHidden must not collapse the slider row, or the viewer resizes its thumbnails on every swipe');
+  assert.match(read('app/screens/paste.css'), /\.sc-act\b/,
+    'the gallery must reserve one row for its actions and its error line');
 
   // The stylesheet has to be loaded and cached, or the strip renders unstyled
   // on the flight this app is for.

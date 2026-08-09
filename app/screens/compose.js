@@ -66,29 +66,32 @@
 import { defineScreen } from '../screen.js';
 import { register } from '../router.js';
 import { currentStyle, currentCols } from '../state.js';
-import { baseLineHeight } from '../../src/sizing.js';
-import { advanceCssFor } from '../../src/constants.js';
 import { actionBar } from '../actionbar.js';
 import { sizeSlider } from '../sizeslider.js';
-import { paintArt, autoFit, publishArtWidth, stageArtWidth, fitFontSize } from '../art.js';
-import { messageName, fileName } from '../words.js';
+import { artefact } from '../artefact.js';
+import { paintArt, autoFit, publishArtWidth, stageArtWidth } from '../art.js';
+import { messageName } from '../words.js';
 import * as recents from '../recents.js';
 import { thumbStrip } from '../thumbstrip.js';
 import { encodePhoto, getSubject, clearSubject, decodeMessage } from '../pipeline.js';
 
-const SAVE_FORMATS = [
-  // TXT and HTML are free: both strings are already in memory. gridToRows()
-  // output is the txt, buildMessage() output is the html.
-  { ext: 'txt', label: 'TXT', blurb: 'The message itself, one row per line', type: 'text/plain' },
-  { ext: 'html', label: 'HTML', blurb: 'The page you would send. Opens anywhere', type: 'text/html' },
-  { ext: 'png', label: 'PNG', blurb: 'A picture of the render', type: 'image/png' },
-  // PDF was cut 2026-08-09. Built from text it reintroduces the font-advance
-  // problem in the one format where the shim cannot correct it, which means
-  // embedding a font subset into a bundle that has to precache before boarding.
-  // Built by rasterising it is a PNG with a page size argument attached. The
-  // use case is printing, and HTML already prints, and prints better, because
-  // the printer scales real text rather than a guessed raster.
-];
+// SAVE_FORMATS, the save sheet, download(), renderPng() and share() are
+// app/artefact.js as of 2026-08-09. They were all inside mount() below, closed
+// over this screen's `lines`, `message`, `geom` and `viewName`, and the gallery
+// now needs the same four behaviours over its own four variables. The choice was
+// one module taking an accessor or a second copy on `paste`, and this codebase
+// has recorded five instances of what the second copy costs.
+//
+// Two things went with them and are worth knowing where to find:
+//
+//   The PNG advance trap -- canvas has its own text metrics, so the advance must
+//   be MEASURED rather than assumed -- is in artefact.js above renderPng(). It is
+//   the mistake this project has now made five times and it is the one comment in
+//   that file that must not be summarised away.
+//
+//   The sheet's rules are app/artefact.css. The dimming selector changed on the
+//   way over: it was keyed on `.sc-view`, this screen's own class, which would
+//   have left the gallery's picture undimmed and tappable behind a modal.
 
 // ---------------------------------------------------------------------------
 // THE SLIDER, AND ITS TICKS, ARE NOT HERE ANY MORE. Moved 2026-08-09.
@@ -567,198 +570,23 @@ export default register(defineScreen({
       }
     }, { signal: ctx.signal });
 
-    // Save sheet. A flush panel that dims what is behind it rather than
-    // floating over it. No elevation anywhere in this app; surfaces separate by
-    // hairline.
-    function openSaveSheet() {
-      root.classList.add('is-dimmed');
-      // The action bar is a sibling of the screen container, so the dimming
-      // rule in compose.css cannot reach it: it stayed lit and clickable behind
-      // an aria-modal dialog, and SHARE was one tap away from firing on a
-      // message the user was in the middle of deciding how to save. Set inline
-      // rather than adding a rule to shell.css, since .app-bottom belongs to
-      // the shell and a screen only owns what it puts inside it.
-      ctx.bottomBar.style.filter = 'brightness(0.3)';
-      ctx.bottomBar.style.pointerEvents = 'none';
-      const scrim = document.createElement('div');
-      scrim.className = 'sc-sheet';
-      scrim.setAttribute('role', 'dialog');
-      scrim.setAttribute('aria-modal', 'true');
-      scrim.setAttribute('aria-label', 'Save as');
-
-      const head = document.createElement('p');
-      head.className = 'sc-sheet-head';
-      head.textContent = 'SAVE AS';
-      scrim.append(head);
-
-      for (const fmt of SAVE_FORMATS) {
-        const row = document.createElement('button');
-        row.type = 'button';
-        row.className = 'sc-sheet-row';
-        const l = document.createElement('span');
-        l.className = 'sc-sheet-ext';
-        l.textContent = fmt.label;
-        const b = document.createElement('span');
-        b.className = 'sc-sheet-blurb';
-        b.textContent = fmt.blurb;
-        const size = document.createElement('span');
-        size.className = 'sc-sheet-size';
-        // PNG's size is not known until it is rendered, and rendering three
-        // formats to fill in a column would cost a canvas pass every time this
-        // sheet opens. An em dash says "not known yet" rather than "nothing".
-        size.textContent = fmt.ext === 'png'
-          ? '—'
-          : `${Math.round((fmt.ext === 'txt' ? lines.join('\n').length : message.length) / 1024)} KB`;
-        row.append(l, b, size);
-        row.addEventListener('click', () => { close(); save(fmt); }, { signal: ctx.signal });
-        scrim.append(row);
-      }
-
-      const cancel = document.createElement('button');
-      cancel.type = 'button';
-      cancel.className = 'sc-sheet-cancel';
-      cancel.textContent = 'CANCEL';
-      cancel.addEventListener('click', close, { signal: ctx.signal });
-      scrim.append(cancel);
-
-      function close() {
-        scrim.remove();
-        root.classList.remove('is-dimmed');
-        ctx.bottomBar.style.filter = '';
-        ctx.bottomBar.style.pointerEvents = '';
-      }
-      ctx.signal.addEventListener('abort', close, { once: true });
-
-      root.append(scrim);
-      cancel.focus();
-    }
-
-    function download(blob, ext) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName(viewName, ext);
-      a.click();
-      // Revoking immediately can cancel the download in some browsers. A tick
-      // later is enough and there is nothing to leak in between.
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
-
-    // ---------------------------------------------------------------------
-    // PNG export. Was a console.warn.
+    // Save and share. The module owns the sheet, the three formats, the PNG
+    // raster and the share/copy fallback; this screen owns only which picture
+    // they act on and what the bar calls them.
     //
-    // THE TRAP, and it is the mistake this codebase has recorded five times:
-    // canvas has its own text metrics, so the advance must be MEASURED with
-    // measureText rather than assumed from ADVANCE_CSS. A guessed advance here
-    // would shear every row against the one below it, and a PNG is the one
-    // output with no fit shim to correct it afterwards.
-    //
-    // The line-height comes from baseLineHeight() at the MEASURED advance, for
-    // the same reason art.js and wrap.js both do: there is one implementation
-    // of that arithmetic and this is not allowed to be a second.
-    //
-    // Rendered at 2x the on-screen fit so it holds up on a retina screen and in
-    // print, capped so a 130-column grid cannot ask for a canvas the browser
-    // will refuse to allocate.
-    // ---------------------------------------------------------------------
-    const PNG_MAX_PX = 4096;
-
-    function renderPng() {
-      if (!lines.length || !geom) return null;
-      const probe = document.createElement('canvas').getContext('2d');
-      const css = getComputedStyle(document.documentElement);
-      const font = css.getPropertyValue('--pt-mono').trim() || 'monospace';
-      const ink = css.getPropertyValue('--pt-art-ink').trim() || '#fff';
-      const bg = css.getPropertyValue('--pt-art-bg').trim() || '#000';
-
-      // Measure at a large size and divide, so the ratio is not quantised by
-      // sub-pixel rounding at 12px.
-      const PROBE_PX = 100;
-      probe.font = `${PROBE_PX}px ${font}`;
-      // A glyph from the payload itself. Measuring 'M' gives the latin advance
-      // even when the payload is braille, and those only agree in a monospace
-      // font if the font is honest about it.
-      const sample = lines[0][0] || 'M';
-      const measured = probe.measureText(sample).width / PROBE_PX;
-      const advance = measured > 0.1 && measured < 2 ? measured : advanceCssFor(geom.codec);
-      const lh = baseLineHeight(geom.codec, advance);
-
-      let fontSize = fitFontSize(geom, stage.clientWidth, stage.clientHeight, advance) * 2;
-      const w = () => Math.ceil(geom.cols * fontSize * advance);
-      const h = () => Math.ceil(geom.rows * fontSize * lh);
-      while ((w() > PNG_MAX_PX || h() > PNG_MAX_PX) && fontSize > 1) fontSize *= 0.9;
-
-      const canvas = document.createElement('canvas');
-      canvas.width = w();
-      canvas.height = h();
-      const g = canvas.getContext('2d');
-      g.fillStyle = bg;
-      g.fillRect(0, 0, canvas.width, canvas.height);
-      g.fillStyle = ink;
-      g.font = `${fontSize}px ${font}`;
-      g.textBaseline = 'alphabetic';
-      const lineH = fontSize * lh;
-      // Centre each row's baseline in its line box, the way a <pre> does, so
-      // the raster matches what is on screen rather than sitting a few pixels
-      // high.
-      const baseline = (lineH + fontSize * 0.72) / 2;
-      for (let i = 0; i < lines.length; i += 1) {
-        g.fillText(lines[i], 0, i * lineH + baseline);
-      }
-      return canvas;
-    }
-
-    function save(fmt) {
-      if (fmt.ext === 'txt') {
-        download(new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' }), 'txt');
-        say('Saved as TXT');
-        return;
-      }
-      if (fmt.ext === 'html') {
-        // The message is `header\n<html…>`. What gets saved is the page, so the
-        // header line is dropped: it is wire metadata, and a browser opening
-        // the file would render it as a stray line above the picture.
-        const html = message.slice(message.indexOf('\n') + 1);
-        download(new Blob([html], { type: 'text/html;charset=utf-8' }), 'html');
-        say('Saved as HTML');
-        return;
-      }
-      // PNG. This also settles a spec question: PNG export is in spec 9's Out
-      // list, cut when the canvas renderer was going to live in the wrapper.
-      // The app-side canvas survived that cut (spec 9 keeps it In, for the
-      // viewfinder and the decode preview), so the exclusion is stale.
-      let canvas = null;
-      try {
-        canvas = renderPng();
-      } catch (err) {
-        console.error('compose: PNG render failed', err);
-      }
-      if (!canvas) { say('That picture could not be rendered as a PNG.', 'error'); return; }
-      say('Rendering PNG…');
-      canvas.toBlob((blob) => {
-        if (!blob) { say('That picture could not be rendered as a PNG.', 'error'); return; }
-        download(blob, 'png');
-        say('Saved as PNG');
-      }, 'image/png');
-    }
-
-    async function share() {
-      const text = message;
-      try {
-        if (navigator.share) {
-          await navigator.share({ text });
-          return;
-        }
-        await navigator.clipboard.writeText(text);
-        // Copy is the documented fallback for when the share sheet misbehaves
-        // (spec 5.2). This used to overwrite the name element to say so, which
-        // destroyed the message's name with nothing to restore it from. It goes
-        // in the status line, which exists for exactly this.
-        say('Copied to the clipboard');
-      } catch {
-        // A cancelled share sheet throws. That is a user decision, not an error.
-      }
-    }
+    // `current` is an accessor, not a snapshot, and that is load-bearing here in
+    // a way it is not on the gallery: this screen re-encodes on every settled
+    // slider drag and swaps the whole picture on every swipe, so a value
+    // captured at mount would export the photograph at the size it had when you
+    // arrived. `geom` and `lines` are reassigned by reencode() and by show().
+    const acts = artefact({
+      root,
+      bottomBar: ctx.bottomBar,
+      stage,
+      say,
+      current: () => ({ name: viewName, message, lines, geom }),
+      signal: ctx.signal,
+    });
 
     // Action bar. Leftmost is BACK, and it goes where you came from: capture
     // for one of yours, open for one of theirs.
@@ -768,14 +596,14 @@ export default register(defineScreen({
         flex: 22,
         onTap: () => { clearSubject(); ctx.navigate(mine ? 'capture' : 'paste'); },
       },
-      { label: 'SAVE', flex: 28, onTap: openSaveSheet },
+      { label: 'SAVE', flex: 28, onTap: acts.save },
       {
         label: 'SHARE',
         aria: 'Share this message',
         flex: 50,
         hero: true,
         armAfter: 250,
-        onTap: share,
+        onTap: acts.share,
       },
     ], { signal: ctx.signal });
 

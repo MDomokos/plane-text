@@ -233,12 +233,25 @@ export function sizeSlider(host, {
     el,
     input,
     sync,
-    // Hidden on BOTH, because .pt-slider[hidden] and .pt-slider-input[hidden]
-    // are separate rules and compose sets both. A wrapper that collapses around
-    // a visible input, or the reverse, is a control that half exists.
+    // VACANT RATHER THAN ABSENT. Changed 2026-08-09.
+    //
+    // This set `hidden` on the wrapper and the input, which is `display: none`,
+    // which took the whole 44px row out of the band. That was correct while the
+    // recents strip below it was a fixed height pinned with `margin-top: auto`:
+    // the strip stayed put and the band simply carried one row fewer.
+    //
+    // The strip fills the band now (thumbstrip.css), so a row that disappears
+    // is 48px handed to the thumbnails, and every thumbnail changes size the
+    // moment you swipe from your own photo onto a received one. The control
+    // therefore keeps its row and stops being there inside it. See
+    // `.pt-slider.is-vacant` in sizeslider.css for why that is `visibility`
+    // rather than `opacity`.
+    //
+    // Still one call for the whole control. The old pair of `hidden` flags
+    // existed because .pt-slider[hidden] and .pt-slider-input[hidden] are
+    // separate rules; visibility inherits, so the wrapper carries both.
     setHidden(on) {
-      el.hidden = Boolean(on);
-      input.hidden = Boolean(on);
+      el.classList.toggle('is-vacant', Boolean(on));
     },
   };
 }

@@ -78,6 +78,7 @@ import { paintArt, autoFit, publishArtWidth, stageArtWidth } from '../art.js';
 import { messageName, currentWord } from '../words.js';
 import * as recents from '../recents.js';
 import { thumbStrip } from '../thumbstrip.js';
+import { artefact } from '../artefact.js';
 import { decodeMessage, looksLikeMessage, setSubject, takeSharedText } from '../pipeline.js';
 
 // Longest edge a picked photo is decoded at.
@@ -113,24 +114,32 @@ export default register(defineScreen({
     el.append(root);
 
     // --- top band --------------------------------------------------------
-    // The shell's title row: the delete control, then the name. Identical to
-    // the viewer's, from the same rule, which is the point of it being in
-    // shell.css. See the note in compose.js for why delete is here and on the
-    // left rather than in the bottom band or the action bar.
+    //
+    // THE NAME ALONE. Changed 2026-08-09, when the picture got a row of verbs.
+    //
+    // It was the shell's .app-chrome-row: a fixed 88px column for the DELETE
+    // control, the name, and a second empty 88px column whose only job was to
+    // keep the name centred against the first. That row exists because a control
+    // whose label changes length -- DELETE becomes TAP AGAIN -- would otherwise
+    // shove the name sideways in the one band whose entire purpose is that
+    // nothing moves.
+    //
+    // DELETE is in the action row at the bottom now, beside SHARE and SAVE,
+    // because it is one of the three things you can do to the picture on the
+    // stage and it was the only one of the three this screen had. With it gone
+    // there is nothing to balance, both gutters are dead weight, and the name
+    // simply centres on the art the way .app-name already asks to.
+    //
+    // The viewer keeps .app-chrome-row. Its delete is still up there, because
+    // its bottom band is full -- 173 of 176 -- and there is nowhere for a fourth
+    // row to go. The two screens differing here is the bands differing, which is
+    // the same reason their strips resolve to different sizes.
     const top = document.createElement('div');
     top.className = 'app-chrome-top';
 
-    const topRow = document.createElement('div');
-    topRow.className = 'app-chrome-row';
-
-    const delSlot = document.createElement('div');
-    delSlot.className = 'app-chrome-slot';
-
     const label = document.createElement('p');
     label.className = 'app-name';
-
-    topRow.append(delSlot, label);
-    top.append(topRow);
+    top.append(label);
 
     // --- stage -----------------------------------------------------------
     //
@@ -194,20 +203,60 @@ export default register(defineScreen({
     const bottom = document.createElement('div');
     bottom.className = 'app-chrome-bot';
 
-    // Errors about a paste, and they stay their own element rather than folding
-    // into the status line. .app-status is one ellipsised line and these run to
-    // three: "That image could not be read. HEIC photos only work in Safari"
-    // needs the room, and an error you can only read half of is spec 8's whole
-    // complaint about error copy.
+    // ONE RESERVED ROW, TWO OCCUPANTS. Added 2026-08-09 with the action row.
     //
-    // First in the band, so it sits directly under the picture where the
-    // viewer's fit line does. The strip's `margin-top: auto` keeps the strip at
-    // the bottom whether this is showing or not.
+    // The row is --pt-tap tall and always in the layout, and exactly one of two
+    // things is in it: what you can DO with the picture on the stage, or what
+    // went wrong with the last paste. They are mutually exclusive in meaning as
+    // well as in space -- an error about a message that did not decode is not a
+    // moment at which you are deciding whether to share the picture behind it --
+    // so the alternative, two rows each reserved separately, would cost 48px of
+    // a band that is now spending its slack on the strip.
+    //
+    // WHY IT IS RESERVED RATHER THAN JUST PRESENT. The strip below fills what
+    // the band has left (thumbstrip.css), so a row that appears and disappears
+    // resizes every thumbnail in it. A fixed row means the strip is 102px
+    // whatever is in it. A three-line error is the one case that exceeds the
+    // reservation, and then the strip gives up ten pixels rather than the error
+    // being clipped -- measured at 390px both of spec 8's strings wrap to two
+    // lines, so it is the failure mode rather than the common case.
+    const act = document.createElement('div');
+    act.className = 'sc-act';
+
+    // The verbs. SHARE and SAVE are app/artefact.js, mounted below; DELETE is
+    // the thumbstrip's own control, built into the third slot, because the
+    // entry it removes is the entry the strip has selected and the arming
+    // belongs with the list it acts on.
+    const actions = document.createElement('div');
+    actions.className = 'sc-actions';
+
+    const shareBtn = document.createElement('button');
+    shareBtn.type = 'button';
+    shareBtn.className = 'sc-act-btn';
+    shareBtn.textContent = 'SHARE';
+    shareBtn.setAttribute('aria-label', 'Share this picture');
+
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'sc-act-btn';
+    saveBtn.textContent = 'SAVE';
+
+    const delSlot = document.createElement('div');
+    delSlot.className = 'sc-act-slot';
+
+    actions.append(shareBtn, saveBtn, delSlot);
+
+    // Errors about a paste, their own element rather than folded into the
+    // status line. .app-status is one ellipsised line and these run to two or
+    // three, and an error you can only read half of is spec 8's whole complaint
+    // about error copy.
     const problem = document.createElement('p');
     problem.className = 'sc-problem';
     problem.hidden = true;
     problem.setAttribute('role', 'status');
-    bottom.append(problem);
+
+    act.append(actions, problem);
+    bottom.append(act);
 
     // The strip, permanent, and the same component the viewer uses. It is built
     // here, in the middle of assembling the band, because the band is a flex
@@ -227,6 +276,9 @@ export default register(defineScreen({
       pickVerb: 'Show',
       say,
       deleteHost: delSlot,
+      // One of three equal controls in a row, not a fixed column beside a
+      // centred name. See `.pt-del.is-fill` in thumbstrip.css.
+      deleteFill: true,
       onPick: (_entry, i) => show(i),
       onDelete: (entry, { index }) => {
         say(`Deleted ${entry.name.split(' ')[0]}`);
@@ -295,6 +347,11 @@ export default register(defineScreen({
     // stale-index bug the viewer's onDelete had to fix.
     let lines = [];
     let geom = null;
+    // What SHARE and SAVE act on. Kept beside `lines` and `geom` because they
+    // are the same fact -- what is on the stage -- and artefact.js reads all
+    // four through one accessor.
+    let message = '';
+    let viewName = '';
 
     function draw(w, h) {
       // From the RESERVED box, not from what was just painted. See art.js: it
@@ -306,6 +363,39 @@ export default register(defineScreen({
     }
 
     const refit = autoFit(stage, draw, { signal: ctx.signal });
+
+    // Save and share, which are app/artefact.js and shared with the viewer.
+    // This screen contributes the accessor and two buttons; the sheet, the three
+    // formats, the PNG raster and the clipboard fallback are all in there.
+    //
+    // The accessor is why the gallery can have these at all without a second
+    // copy: what is on the stage changes on every thumbnail tap, so a value
+    // captured here would export whatever was showing when the screen mounted.
+    const acts = artefact({
+      root,
+      bottomBar: ctx.bottomBar,
+      stage,
+      say,
+      current: () => ({ name: viewName, message, lines, geom }),
+      signal: ctx.signal,
+    });
+    shareBtn.addEventListener('click', acts.share, { signal: ctx.signal });
+    saveBtn.addEventListener('click', acts.save, { signal: ctx.signal });
+
+    // The reserved row's two occupants, switched in one place so they cannot
+    // both be on screen and cannot both be off it.
+    function setProblem(text) {
+      problem.textContent = text || '';
+      problem.hidden = !text;
+      actions.hidden = Boolean(text);
+    }
+
+    // Whether there is a picture to act on. Vacant rather than absent, for the
+    // reason the row is reserved: `hidden` here would hand 44px to the strip and
+    // resize every thumbnail the moment the last entry was deleted.
+    function setActs(on) {
+      actions.classList.toggle('is-vacant', !on);
+    }
 
     // Exactly one of the three is visible. Passing the mode rather than
     // toggling one element at each call site is what stops a state where the
@@ -339,7 +429,11 @@ export default register(defineScreen({
         rows: decoded.grid.rows,
       };
 
+      message = entry.message;
+      viewName = entry.name;
+
       setMode('picture');
+      setActs(true);
       pre.setAttribute('aria-label', `Photo as text: ${entry.name}`);
       label.textContent = `${entry.name} · ${entry.source || 'received'}`;
       ctx.setTitle(entry.name);
@@ -352,7 +446,13 @@ export default register(defineScreen({
     function showEmpty() {
       lines = [];
       geom = null;
+      message = '';
+      viewName = '';
       setMode('empty');
+      // Nothing on the stage, so nothing to share, save or delete. The strip's
+      // own empty state says why, and thumbstrip hides its DELETE for the same
+      // reason.
+      setActs(false);
       // The screen's own name, since these routes have no header (shell.css).
       // Not a message name, because there is no message.
       label.textContent = 'OPEN';
@@ -362,9 +462,11 @@ export default register(defineScreen({
 
     // --- opening a message -----------------------------------------------
 
-    function fail(message) {
-      problem.textContent = message;
-      problem.hidden = false;
+    function fail(text) {
+      // `text` rather than `message`: `message` is the wire string of the
+      // picture on the stage now, and one of the two would have had to be the
+      // shadowed one.
+      setProblem(text);
     }
 
     // A message that has just arrived, by clipboard, by paste event or by share
@@ -372,7 +474,7 @@ export default register(defineScreen({
     // things you do with a message someone just sent you -- save it, share it
     // on, read the decode warnings -- are all there.
     function openMessage(text, name) {
-      problem.hidden = true;
+      setProblem('');
       if (!looksLikeMessage(text)) {
         // Spec 8, first row. Phrased as something the user can act on, since
         // the commonest cause is a partial copy.
@@ -408,6 +510,9 @@ export default register(defineScreen({
         openMessage(text);
       } catch {
         setMode('field');
+        // The field is over the picture, so the verbs are not about anything
+        // the user can see. A tap on any thumbnail puts both back.
+        setActs(false);
         field.focus();
       }
     }
@@ -473,7 +578,7 @@ export default register(defineScreen({
       // control.
       fileInput.value = '';
       if (!file) return;
-      problem.hidden = true;
+      setProblem('');
       try {
         const photo = await photoFromFile(file);
         setSubject({
@@ -524,21 +629,45 @@ export default register(defineScreen({
     // is now something saved, the action it carried has to survive at the same
     // weight or the screen quietly gets harder to use the more you use it.
     //
-    // 22/28/50 is the viewer's split, reused rather than re-derived, so the two
-    // three-slot bars in the app have one geometry. At 390px that is 76 / 97 /
-    // 173 across a 346px usable width; actionbar.js throws below 44.
+    // 30 / 30 / 40, NOT THE VIEWER'S 22 / 28 / 50. Changed 2026-08-09.
+    //
+    // The split was borrowed from the viewer on the grounds that two three-slot
+    // bars should have one geometry. That was the wrong thing to hold constant.
+    // The viewer's three are BACK, SAVE, SHARE -- a way out, a secondary, and
+    // the end of a flow -- so the ramp says which one finishes the job. All
+    // three of these are ENTRANCES, and 76 / 97 / 173 across the width asserts
+    // that one door is more than twice as likely as another, which is a claim
+    // about behaviour that nothing has measured.
+    //
+    // PASTE keeps the hero and the extra ten points, on three grounds that all
+    // point the same way. The route is called paste. Receiving is the expensive
+    // path the app exists to shorten -- five taps on iOS, because Safari has no
+    // Web Share Target -- while shooting and importing are both one tap from the
+    // app's default route. And the empty state's full-bleed target IS this
+    // action: when it disappears because something is saved, the action it
+    // carried has to survive at the same weight, or the screen gets harder to
+    // use the more you use it.
+    //
+    // ALBUM, NOT PHOTO. Five letters each, adjacent slots, both about
+    // photographs, and the only difference -- make a new one against use one you
+    // already have -- was carried by nothing the eye can catch at 12px. SHOOT is
+    // a verb and ALBUM is a place, which is the distinction the two slots are
+    // actually making.
+    //
+    // At 390px that is 100 / 100 / 134 across a 342px usable width, all clear of
+    // the 44px floor actionbar.js throws under.
     actionBar(ctx.bottomBar, [
-      { label: 'SHOOT', flex: 22, onTap: () => ctx.navigate('capture') },
+      { label: 'SHOOT', flex: 30, onTap: () => ctx.navigate('capture') },
       {
-        label: 'PHOTO',
+        label: 'ALBUM',
         aria: 'Use a photo you already have',
-        flex: 28,
+        flex: 30,
         onTap: () => fileInput.click(),
       },
       {
         label: 'PASTE',
         aria: 'Paste from clipboard',
-        flex: 50,
+        flex: 40,
         hero: true,
         onTap: fromClipboard,
       },

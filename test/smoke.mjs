@@ -266,12 +266,27 @@ const recents = await import(`${ROOT}/app/recents.js`);
   ok(container.querySelector('.app-name').textContent.startsWith('older'), 'gallery: a tap shows that entry in the stage');
   thumbs[0].dispatchEvent(new window.Event('click', { bubbles: true }));
 
-  // Delete: one labelled control, in the top band, acting on what is on screen.
-  // It arms first. That is the whole reason a mis-tap is harmless and it is the
-  // contract the old corner button paid for with a sub-44px target.
+  // Delete: one labelled control acting on what is on screen. It arms first.
+  // That is the whole reason a mis-tap is harmless and it is the contract the
+  // old corner button paid for with a sub-44px target.
+  //
+  // IN THE ACTION ROW SINCE 2026-08-09, not in the top band. It moved because it
+  // was the only thing this screen let you do to the picture you had just tapped
+  // -- SHARE and SAVE were on the viewer, reachable only by pasting again -- so
+  // the destructive action was the whole of the gallery's vocabulary. It is one
+  // of three now, and the top band is the name alone.
+  //
+  // The viewer's is still in ITS top band, and the assertion below says so on
+  // purpose: the two screens differ because their bands do. compose's bottom
+  // band is 173 of 176 and cannot hold a --pt-tap row without shrinking every
+  // picture in the app.
   const del = container.querySelector('.pt-del');
   ok(del && !del.hidden && del.textContent === 'DELETE', 'gallery: a labelled delete, not a corner glyph');
-  ok(container.querySelector('.app-chrome-top').contains(del), 'gallery: delete is in the top band, not over the picture');
+  ok(container.querySelector('.sc-actions').contains(del), 'gallery: delete is in the action row, beside SHARE and SAVE');
+  ok(del.classList.contains('is-fill'), 'gallery: and it is one of three equal slots, not an 88px column');
+  ok(!container.querySelector('.app-chrome-top').querySelector('.pt-del'), 'gallery: the top band is the name alone');
+  ok([...container.querySelectorAll('.sc-act-btn')].map((b) => b.textContent).join(',') === 'SHARE,SAVE',
+     'gallery: the picture has verbs of its own');
   del.dispatchEvent(new window.Event('click', { bubbles: true }));
   ok(del.dataset.armed === '1' && del.textContent === 'TAP AGAIN', 'gallery: the first tap arms rather than deletes');
   ok(container.querySelectorAll('.pt-thumb').length === 2, 'gallery: the first tap removes nothing');
@@ -384,12 +399,22 @@ const recents = await import(`${ROOT}/app/recents.js`);
   const decoded = decodeMessage(out.message);
   setSubject({ kind: 'theirs', message: out.message, name: 'theirs 20260809 1200', decoded });
   await mount('compose');
-  // Both halves of setHidden(): the wrapper collapses and the input goes with
-  // it. They are two rules in sizeslider.css, and a wrapper that collapses
-  // around a visible input is a control that half exists.
+  // VACANT, NOT ABSENT. Changed 2026-08-09 with the strip that fills the band.
+  //
+  // This used to assert `hidden` on the wrapper and the input, which is
+  // `display: none`, which took the row out of the band. That was fine while the
+  // strip was a fixed height pinned with `margin-top: auto`. The strip is
+  // `flex: 1 1 auto` now, so a row that disappears is 48px handed to the
+  // thumbnails, and every thumbnail would change size the moment you swiped from
+  // your own photo onto a received one.
+  //
+  // So the row stays and its contents stop being there. `visibility: hidden`
+  // also takes the input out of the tab order and the accessibility tree, which
+  // is the half of `hidden` that was doing real work -- and it is one class on
+  // the wrapper rather than two flags, because visibility inherits.
   const slider = container.querySelector('.pt-slider-input');
-  ok(slider.hidden, 'compose: no slider for a received message');
-  ok(container.querySelector('.pt-slider').hidden, 'compose: and the wrapper goes with it');
+  ok(container.querySelector('.pt-slider').classList.contains('is-vacant'), 'compose: the slider is vacant for a received message');
+  ok(!container.querySelector('.pt-slider').hidden && !slider.hidden, 'compose: but its row is still reserved, so the strip does not resize');
   ok(container.querySelector('.app-status'), 'compose: status line present for warnings');
 }
 
