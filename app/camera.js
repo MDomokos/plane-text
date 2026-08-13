@@ -559,6 +559,17 @@ export async function openCamera({ facingMode = 'environment', host = null } = {
 // ---------------------------------------------------------------------------
 // A STILL, WEARING THE CAMERA'S INTERFACE. Added 2026-08-09 for §6e.
 //
+// ---------------------------------------------------------------------------
+// UNREACHABLE FROM THE APP AS OF 2026-08-13. Its one caller was capture's import
+// sub-mode, which is retired: styleId has a component owner (app/stylerow.js),
+// the viewer carries the style row, and a picked photo goes straight to
+// `compose`. See capture.js's header.
+//
+// Kept, because it has tests and because "a still answering the camera's
+// interface" is the shape any future frozen-source feature wants. Flagged,
+// because it is now in the quadrant codec's position -- shipped, correct, and
+// with nothing routing to it. Either something uses it or it comes out.
+//
 // The hole this fills: "style was chosen at capture" was false for an imported
 // photo, because there was no capture. The file picker on `paste` dropped the
 // user straight into `compose`, so a library import had no moment at which

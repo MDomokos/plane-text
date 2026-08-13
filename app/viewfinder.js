@@ -533,10 +533,14 @@ export function startViewfinder({
     get canvas() { return surface; },
     // Stop looping. The caller drives with refresh() from here on.
     //
-    // Used by capture's frozen sub-mode, where the source is a picked photo.
+    // Used by capture's frozen sub-mode, where the source was a picked photo.
     // The loop would otherwise re-encode an unchanging image twenty times a
     // second and, worse, the degradation ladder would start stepping down on a
     // still -- reporting "coarse" about a picture that was never moving.
+    //
+    // UNREACHABLE AS OF 2026-08-13, with that sub-mode. Same note as
+    // openStill() in camera.js: kept for the shape, flagged because unreachable
+    // code that reads as live is how the quadrant codec got where it is.
     freeze() { frozen = true; },
     get isStatic() { return frozen || LADDER[rung].fps === 0; },
     get rung() { return rung; },

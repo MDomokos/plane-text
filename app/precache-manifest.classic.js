@@ -6,7 +6,7 @@
 //   importScripts('app/precache-manifest.classic.js');
 //   self.PRECACHE.map(function (p) { return new URL(p, self.location).href; });
 
-self.PRECACHE_VERSION = 'pt-7a02b9e01dd9';
+self.PRECACHE_VERSION = 'pt-357f04ad02af';
 
 self.PRECACHE = [
   'app/actionbar.css',
@@ -16,6 +16,7 @@ self.PRECACHE = [
   'app/artefact.js',
   'app/atlas.js',
   'app/camera.js',
+  'app/gear.js',
   'app/glyphgl.js',
   'app/icon-192.png',
   'app/icon-512.png',
@@ -48,6 +49,8 @@ self.PRECACHE = [
   'app/sizeslider.js',
   'app/state.js',
   'app/stylegesture.js',
+  'app/stylerow.css',
+  'app/stylerow.js',
   'app/thumb.js',
   'app/thumbstrip.css',
   'app/thumbstrip.js',

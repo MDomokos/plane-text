@@ -1,12 +1,13 @@
 // Plane Text: shared state.
 //
-// A store, not a framework: get() / set() / subscribe(). Screens own fields.
-// The store owns nothing but the notification. Every field below names one
-// owner, the screen allowed to write it. Everybody may read.
+// A store, not a framework: get() / set() / subscribe(). Screens and components
+// own fields, and a component owner outranks a screen; see the two rows below
+// that name a module. The store owns nothing but the notification. Every field
+// names one owner, the only thing allowed to write it. Everybody may read.
 //
 //  field           type                       default              owner
 //  --------------  -------------------------  -------------------  ----------------------
-//  styleId         string                     DEFAULT_STYLE 'art'  capture
+//  styleId         string                     DEFAULT_STYLE 'art'  app/stylerow.js
 //  facing          'environment' | 'user'     'environment'        capture
 //  customCharsets  [{ id, name, ramp }]       []                   settings/charsets
 //  sizeChars       int, CHARACTERS            sizeRange().default  app/sizeslider.js
@@ -32,23 +33,36 @@
 //  - Anything a screen alone cares about. A local `let` inside mount() is not
 //    a lesser thing than a store field.
 //
-// Style is chosen at capture, not in the composer (spec 5.1). That is why
-// styleId's owner is the capture screen, and why the compose screen has no
-// style picker to write one.
+// STYLE WAS CHOSEN AT CAPTURE, AND NOW IT IS NOT. Rewritten 2026-08-13.
 //
-// That rule was repaired rather than broken, 2026-08-09.
+// Spec 5.1 called style "a lens, not an export option": choosing it at capture
+// keeps it framing rather than filtering. That is why this table said styleId's
+// owner was `capture`, and why the composer had no style picker to write one.
 //
-// "Style was chosen at capture" was false for an imported photo, because there
-// was no capture: the picker lived on `paste` and dropped the user straight
-// into `compose`, so a library import had no moment at which style could be
-// chosen. A gap rather than a preference.
+// It was false for an imported photo. There was no capture -- the picker lived
+// on `paste` and dropped the user straight into `compose` -- so a library import
+// had no moment at which style could be chosen. A gap rather than a preference.
 //
 // Two repairs were available. Give compose a style row, which makes styleId a
 // two-owner field and this table wrong. Or route imports through capture so the
-// moment exists. The second was taken, as a frozen sub-mode in capture.js, and
-// styleId still has one owner.
+// moment exists. The second was taken on 2026-08-09, as a frozen sub-mode in
+// capture.js reading [ USE ], and styleId kept one owning screen.
 //
-// ONE ROW OF THIS TABLE NAMES A MODULE RATHER THAN A SCREEN. 2026-08-09.
+// It was reversed on 2026-08-13: the sub-mode was the composer with a different
+// hero label. See app/stylerow.js.
+//
+// The third repair was available all along, and the row below had already taken
+// it: give the FIELD a component owner. app/stylerow.js writes styleId; both
+// picture screens mount it; no screen writes it, capture included. Under the old
+// rule two screens could each have written the field with nothing mechanical to
+// stop them. A test greps all three.
+//
+// It retires spec 5.1's "style is a lens". Style is changeable after the fact
+// now, for photographs you shot as well as ones you imported. That argument was
+// always in tension with the library path, where there is no framing moment.
+//
+// TWO ROWS OF THIS TABLE NAME A MODULE RATHER THAN A SCREEN. 2026-08-09,
+// 2026-08-13.
 //
 // sizeChars' owner was `compose`, on the same reasoning styleId's is `capture`:
 // the size was chosen after the shot, so the composer chose it. The owner
@@ -56,9 +70,9 @@
 // just after the image was taken" -- and asked for the control on BOTH screens.
 //
 // That is a two-writer field, which is the problem styleId had, and the rule
-// above is that it gets repaired rather than accepted. styleId's repair was to
-// make the missing moment exist so the field kept one writer. There is no
-// equivalent here: two screens genuinely do choose the size now, by
+// above is that it gets repaired rather than accepted. styleId's first repair
+// was to make the missing moment exist so the field kept one owning screen.
+// There was no equivalent here: two screens genuinely do choose the size, by
 // instruction, and no amount of routing makes that one screen.
 //
 // So the repair is applied one level down. The control is a component,
@@ -75,6 +89,9 @@
 // capture does, so there is no direct write left anywhere. The test that greps
 // for one now greps BOTH picture screens, which is what turns this row from a
 // prose convention into something that fails when it stops being true.
+//
+// This row went first and styleId followed on 2026-08-13, once keeping a screen
+// in its owner column had cost a whole screen mode.
 //
 // The consequence: capture and compose now share a stage geometry (shell.css
 // .app-frame) and differ only in their chrome bands, so they read as one screen

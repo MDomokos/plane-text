@@ -30,17 +30,18 @@
 //
 // state.js's table names one owner per field, and sizeChars' owner was
 // `compose`. A slider on capture makes that a two-writer field, which is the
-// problem styleId had and which was REPAIRED rather than accepted (state.js,
-// "That rule was repaired rather than broken"). The repair there was to give
-// the import a capture moment so styleId kept one writer.
+// problem styleId had and which was repaired rather than accepted. The repair
+// there was to give the import a capture moment so styleId kept one writer.
 //
-// There is no equivalent available here: the owner has asked for the control on
-// both screens by name, so two screens genuinely do choose the size. What can
-// still be true is that there is one WRITER, and this module is it. Both
-// screens mount it; neither sets sizeChars itself; the field's owner in the
-// table is this file. That is the same shape as the repair, applied to the
-// write rather than to the moment, and it is checkable -- a test greps the
-// screens for a direct write.
+// There is no equivalent available here: the owner asked for the control on both
+// screens by name, so two screens genuinely do choose the size. What can still
+// be true is that there is one WRITER, and this module is it. Both screens mount
+// it; neither sets sizeChars itself; the field's owner in the table is this
+// file. It is checkable, which prose is not -- a test greps the screens for a
+// direct write.
+//
+// styleId took the same route on 2026-08-13 (app/stylerow.js). This is the
+// pattern to reach for when two screens need one control.
 //
 // That is now true of the whole tree. compose.js's inline build, its own
 // DEVICE_MARKERS and its own sliderTicks were deleted on 2026-08-09 and it
@@ -208,12 +209,34 @@ export function sizeSlider(host, {
     return { chars: s.sizeChars, cols: currentCols(s) };
   }
 
+  // THE FILLED PORTION OF THE TRACK. Added 2026-08-13.
+  //
+  // Publishes --pt-slider-fill for the WebKit track's gradient; Firefox uses
+  // ::-moz-range-progress and needs nothing from here. The design argument is in
+  // sizeslider.css, at the rule that reads it.
+  //
+  // Written to the wrapper rather than the input: a custom property on the input
+  // is inherited by ::-webkit-slider-runnable-track anyway, and the wrapper is
+  // where the ticks would read it from.
+  //
+  // Uncoalesced, like the store write above. It is one style property and the
+  // browser batches the paint; throttling would put the fill behind the thumb
+  // during a drag, which is when it is being looked at.
+  function paint() {
+    const span = range.maxChars - range.minChars;
+    const pct = span > 0
+      ? ((Number(input.value) - range.minChars) / span) * 100
+      : 0;
+    el.style.setProperty('--pt-slider-fill', `${Math.max(0, Math.min(100, pct)).toFixed(3)}%`);
+  }
+
   input.addEventListener('input', () => {
     // The store is written on EVERY input, uncoalesced, because it is a shallow
     // merge and a notify and it is what keeps the readout, the persistence and
     // any other subscriber from desynchronising from the thumb. Only the
     // caller's expensive work is throttled, and only by the caller.
     store.set({ sizeChars: Number(input.value) });
+    paint();
     if (onInput) onInput(payload());
   }, { signal });
 
@@ -224,6 +247,13 @@ export function sizeSlider(host, {
   function sync() {
     const want = String(store.get().sizeChars);
     if (input.value !== want) input.value = want;
+    // Unconditional, unlike the assignment above. sync() is called after
+    // anything that moved sizeChars without going through this control, and the
+    // early-out on `input.value` guards against interrupting a drag -- it does
+    // not mean the fill is already right. On first mount the values agree
+    // (`input.value` defaults to the range midpoint) and the fill has never
+    // been painted at all.
+    paint();
   }
 
   sync();

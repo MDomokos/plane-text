@@ -2123,6 +2123,81 @@ test('every route in the table is reachable from the running app', async () => {
   }
 });
 
+test('the still\'s inset is one number, written in two files that must agree', async () => {
+  // STILL_INSET_PX is subtracted from the box before paintArt() fits to it,
+  // because autoFit() measures the stage's border box and a CSS padding would
+  // be included in that measurement. But .app-stage is TOP-ALIGNED, so the
+  // vertical half cannot be a subtraction alone -- the unused height would pool
+  // at the bottom and the picture would step back on three sides and not the
+  // fourth. The margin in shell.css is the fourth side.
+  //
+  // So the number exists in a stylesheet and in a module, which is how each of
+  // README.md's five recorded drifts began. This makes them fail together.
+  const { readFileSync } = await import('node:fs');
+  const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  const { STILL_INSET_PX } = await import('../app/art.js');
+
+  const rule = /\.app-art\.is-framed\s*\{([^}]*)\}/s.exec(read('app/shell.css'));
+  assert.ok(rule, 'the hairline box must exist');
+  const margin = /margin:\s*(\d+)px\s+0/.exec(rule[1]);
+  assert.ok(margin, '.app-art.is-framed must carry the vertical inset as a margin');
+  assert.strictEqual(Number(margin[1]), STILL_INSET_PX,
+    'shell.css and art.js disagree about the still\'s inset');
+
+  // And it is a hairline box, not a fill: 1px, the app's one line token, at the
+  // app's one radius.
+  assert.match(rule[1], /border:\s*1px solid var\(--pt-line\)/);
+  assert.match(rule[1], /border-radius:\s*var\(--pt-radius\)/);
+
+  // Both screens that paint a <pre> must fit to the inset box. Fitting to the
+  // raw stage is the bug this constant exists to prevent, and it is invisible
+  // until the art overflows its own frame.
+  for (const p of ['app/screens/compose.js', 'app/screens/paste.js', 'app/artefact.js']) {
+    assert.match(read(p), /stillBox\(/, `${p} must fit to the still's box, not the stage's`);
+  }
+});
+
+test('styleId has a component owner, and no screen writes it', async () => {
+  // The same shape as the sizeChars ownership test above. This is the second
+  // field to take a component owner, and the pattern is the codebase's answer to
+  // "two screens need one control".
+  //
+  // It was decided the other way first. styleId's owner was `capture`, and to
+  // keep that true a library import was routed back through capture in a frozen
+  // sub-mode with the shutter reading [ USE ]. That shipped on 2026-08-09 and was
+  // reversed on 2026-08-13. The rule that replaced it: no screen may write it.
+  const { readFileSync } = await import('node:fs');
+  const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  const decomment = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  for (const p of ['app/screens/capture.js', 'app/screens/compose.js', 'app/screens/paste.js']) {
+    assert.ok(!/set\(\{[^}]*styleId:/s.test(decomment(read(p))),
+      `${p} must not write styleId: app/stylerow.js owns it`);
+  }
+  assert.match(decomment(read('app/stylerow.js')), /state\.set\(\{ styleId:/, 'the component is the writer');
+  assert.match(read('app/state.js'), /styleId\s+string\s+\S+\s+'art'\s+app\/stylerow\.js/,
+    'the owner table must name the writer');
+
+  // Mounted on both picture screens, which is what the ownership change was
+  // for.
+  for (const p of ['app/screens/capture.js', 'app/screens/compose.js']) {
+    assert.match(decomment(read(p)), /styleRow\(/, `${p} must mount the component`);
+  }
+
+  // The gesture writes through the component rather than around it. This is the
+  // one line most likely to be "simplified" back into a direct state.set(),
+  // because stylegesture.js already computes the id it would write.
+  assert.match(decomment(read('app/screens/capture.js')), /onCycle:\s*\(n\)\s*=>\s*styleCtl\.cycle\(n\)/,
+    'the style gesture must go through the owner');
+
+  // Linked and cached, or the row renders unstyled on the flight this app is
+  // for. Same pair the slider's and the strip's stylesheets get.
+  assert.ok(read('index.html').includes('app/stylerow.css'), 'stylerow.css must be linked');
+  const { PRECACHE } = await import('../app/precache-manifest.js');
+  assert.ok(PRECACHE.includes('app/stylerow.css'), 'run `npm run precache`');
+  assert.ok(PRECACHE.includes('app/stylerow.js'), 'run `npm run precache`');
+});
+
 test('the picture screens hold the 44px floor the action bar enforces in code', async () => {
   // The review's §4: "the 44px floor is enforced in one place and violated in
   // two". actionbar.js throws at runtime rather than ship a 43px slot, while
@@ -2150,9 +2225,23 @@ test('the picture screens hold the 44px floor the action bar enforces in code', 
   //
   // So the assertion is on the property that matters -- a negative top and a
   // negative bottom -- rather than on the shorthand that used to express it.
-  const captureCss = read('app/screens/capture.css');
-  assert.match(captureCss, /\.sc-style::before\s*\{[^}]*top:\s*-\d/s, '.sc-style needs a 44px hit box');
-  assert.match(captureCss, /\.sc-style::before\s*\{[^}]*bottom:\s*-\d/s, '.sc-style needs a 44px hit box');
+  //
+  // The rules moved to app/stylerow.css on 2026-08-13 with the component that
+  // owns styleId, and the prefix went from .sc- to .pt- with them. Nothing about
+  // the arithmetic changed -- which is the point of checking it here rather than
+  // trusting the move.
+  const styleCss = read('app/stylerow.css');
+  assert.match(styleCss, /\.pt-style::before\s*\{[^}]*top:\s*-\d/s, '.pt-style needs a 44px hit box');
+  assert.match(styleCss, /\.pt-style::before\s*\{[^}]*bottom:\s*-\d/s, '.pt-style needs a 44px hit box');
+  // And it did not get left behind in the screen it came from, which would give
+  // two stylesheets an opinion about one control.
+  // Decommented, because capture.css still REFERS to the row: the note on its
+  // top-row gutters records the measurement that made the row a scroll box, and
+  // that note is about capture's layout, not about the component. What must not
+  // survive is a RULE.
+  const decommentCss = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/\.sc-style/.test(decommentCss(read('app/screens/capture.css'))),
+    'the style row is the component\'s, not capture\'s');
 
   // DELETE, AND THE EXCEPTION THAT IS NO LONGER ONE. Rewritten 2026-08-09,
   // second pass, when the corner `×` became one labelled button.
@@ -2359,11 +2448,19 @@ test('the gallery opens on the latest message, and the big paste target is the e
     assert.ok(css.includes(sel), `paste.css owns ${sel}`);
   }
 
-  // The library door survives as an action rather than as a row, and it still
-  // routes through capture's import sub-mode. Dropping the `?import=1` hop is
-  // the regression that would give an imported photo no moment at which style
-  // can be chosen -- see the header of capture.js.
-  assert.match(code, /navigate\('capture', \{ import: '1' \}\)/, 'the picker must still route through capture');
+  // The library door survives as an action rather than as a row, and as of
+  // 2026-08-13 it goes straight to the viewer.
+  //
+  // This asserted the opposite until then -- `navigate('capture', { import:
+  // '1' })` -- because the composer had no style picker and spec 5.1 justified
+  // that with "style was chosen at capture", which was false for an import. The
+  // detour gave the import a capture moment. app/stylerow.js gives the viewer a
+  // style row instead, under an ownership rule that makes mounting it on two
+  // screens safe, so the hop is gone and so is the sub-mode. The property this
+  // line protects is unchanged: an imported photo must reach a screen where
+  // style can be chosen. That is now the same screen a captured one reaches.
+  assert.match(code, /navigate\('compose'\)/, 'the picker must land on the viewer');
+  assert.ok(!/import: '1'/.test(code), 'the capture import sub-mode is retired, not just bypassed');
   // The picker itself is app/photopicker.js as of 2026-08-09, so this stopped
   // being `fileInput.click()` in this file. It moved because capture needed the
   // same door for the button in its camera-denied notice -- spec 8 has promised

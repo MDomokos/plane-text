@@ -164,8 +164,11 @@ async function mount(id, params = {}) {
   ok(container.querySelector('.app-chrome-top'), 'capture: top band');
   ok(container.querySelector('.app-stage'), 'capture: stage');
   ok(container.querySelector('.app-chrome-bot'), 'capture: bottom band');
-  ok(container.querySelector('.sc-gear'), 'capture: settings glyph exists');
-  ok(container.querySelectorAll('.sc-style').length >= 2, 'capture: style row rendered');
+  ok(container.querySelector('.app-gear'), 'capture: settings glyph exists');
+  ok(container.querySelectorAll('.pt-style').length >= 2, 'capture: style row rendered');
+  // Live is bracketed, four corners. The still on the next screen is framed
+  // instead; see the compose block below and capture.js's `frame` note.
+  ok(container.querySelectorAll('.sc-frame-mark').length === 4, 'capture: the viewfinder is bracketed');
   ok(container.querySelector('.app-status'), 'capture: status line');
   ok(bottomBar.querySelectorAll('.pt-slot').length === 2, 'capture: two action slots');
 
@@ -287,6 +290,10 @@ const recents = await import(`${ROOT}/app/recents.js`);
   ok(container.querySelector('.sc-target-note'), 'paste: with its explainer');
   ok(container.querySelector('.app-art').hidden, 'paste: no picture, because there is nothing to show');
 
+  // The settings door is on every picture screen as of 2026-08-13, not just
+  // capture. Reaching it used to mean navigating back to the viewfinder. See
+  // app/gear.js.
+  ok(container.querySelector('.app-gear'), 'paste: settings door present');
   ok(container.querySelector('.pt-strip'), 'paste: the shared strip always renders');
   ok(container.querySelector('.pt-strip-empty'), 'paste: empty state renders when there is nothing');
   // Not a tablist with nothing saved: nothing is the current entry, and a
@@ -400,6 +407,11 @@ const recents = await import(`${ROOT}/app/recents.js`);
   // .app-art, not .sc-view-art. The <pre> rule moved to shell.css on 2026-08-09
   // when the gallery started painting into one too.
   ok(container.querySelector('.app-art').textContent.length > 100, 'compose: art actually painted');
+  ok(container.querySelector('.app-gear'), 'compose: settings door present');
+  // A still is framed. The inset that makes room for the hairline is
+  // STILL_INSET_PX in art.js, subtracted before the fit; the class draws the
+  // box.
+  ok(container.querySelector('.app-art').classList.contains('is-framed'), 'compose: a still is framed');
   const slider = container.querySelector('.pt-slider-input');
   ok(slider && !slider.hidden, 'compose: slider shown for one of yours');
   ok(container.querySelectorAll('.pt-tick').length >= 3, 'compose: slider ticks rendered');
@@ -492,7 +504,18 @@ const recents = await import(`${ROOT}/app/recents.js`);
   ok(container.querySelector('.app-status'), 'compose: status line present for warnings');
 }
 
-// --- capture, import sub-mode ---------------------------------------------
+// --- an imported photo lands on the viewer ---------------------------------
+//
+// REPLACES the capture import sub-mode, removed 2026-08-13. What used to be
+// here mounted `capture?import=1` and asserted a frozen still with the shutter
+// reading [ USE ] and the leftmost slot reading BACK. That whole mode existed so
+// style could be chosen before the picture reached the viewer, and the viewer
+// mounts app/stylerow.js now, so the detour has nothing left to do.
+//
+// The test that replaces it asserts the property the sub-mode was protecting --
+// an imported photo gets a style row -- on the screen it now happens on. See
+// capture.js's header for the reversal, and app/stylerow.js for the ownership
+// change that permitted it.
 {
   const { setSubject, getSubject } = await import(`${ROOT}/app/pipeline.js`);
   const w = 90, h = 120;
@@ -500,20 +523,39 @@ const recents = await import(`${ROOT}/app/recents.js`);
   for (let i = 0; i < w*h; i++) { const v=(i%w)*3; rgba[i*4]=v; rgba[i*4+1]=v; rgba[i*4+2]=v; rgba[i*4+3]=255; }
   setSubject({ kind:'mine', photo:{rgba,width:w,height:h}, word:'SNAP', takenAt:Date.now(), source:'library' });
 
-  const { ctx, screen } = await mount('capture', { import: '1' });
-  ok(container.querySelector('.sc-capture'), 'import: capture root exists');
-  // The frozen path must NOT show the no-camera notice: the still is the source.
-  const notice = container.querySelector('.sc-notice');
-  ok(notice && notice.hidden, 'import: no camera notice, because the still IS the source');
-  ok(container.querySelectorAll('.sc-style').length >= 2, 'import: style row is live');
-  const slots = [...bottomBar.querySelectorAll('.pt-slot')];
-  ok(slots[0].textContent.trim() === 'BACK', `import: leftmost is BACK, got "${slots[0].textContent.trim()}"`);
-  ok(slots[1].textContent.includes('USE'), `import: hero reads USE, got "${slots[1].textContent.trim()}"`);
-  // And it commits to compose rather than back to paste.
-  slots[1].dispatchEvent(new window.Event('click', { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 400));  // the shutter clamp is 230ms
-  ok(ctx.navigated === 'compose', `import: USE goes to compose, got ${ctx.navigated}`);
+  const { screen } = await mount('compose');
+  ok(container.querySelector('.sc-view'), 'import: lands on the viewer, not a capture sub-mode');
+  ok(container.querySelectorAll('.pt-style').length >= 2, 'import: the viewer carries the style row');
+  // Present and live. On a received message it is swapped out for the name
+  // line, and an import is not one.
+  ok(!container.querySelector('.pt-styles').hidden, 'import: the style row is live for a photo of your own');
+  ok(container.querySelector('.app-name').hidden, 'import: and the name line yields the cell to it');
   ok(getSubject() && getSubject().source === 'library', 'import: the subject keeps its library provenance');
+  const slots = [...bottomBar.querySelectorAll('.pt-slot')];
+  ok(!slots.some((s) => s.textContent.includes('USE')), 'import: no [ USE ] hero survives anywhere');
+  if (screen.unmount) screen.unmount();
+}
+
+// --- the style row is one component on both picture screens ----------------
+{
+  const { store } = await import(`${ROOT}/app/state.js`);
+  const before = store.get().styleId;
+
+  const { screen } = await mount('capture');
+  const words = [...container.querySelectorAll('.pt-style')];
+  ok(words.length >= 2, 'stylerow: capture mounts it');
+  ok(container.querySelector('.pt-styles').getAttribute('role') === 'tablist', 'stylerow: it is a tablist');
+  ok(words.every((b) => b.hasAttribute('aria-selected')), 'stylerow: every word reports its state');
+
+  // A tap writes the field. This is the assertion that would have caught the
+  // component being mounted but wired to nothing, which is the failure mode of
+  // moving a control out of the screen that used to own it.
+  const other = words.find((b) => !b.classList.contains('is-on'));
+  other.dispatchEvent(new window.Event('click', { bubbles: true }));
+  ok(store.get().styleId !== before, 'stylerow: a tap writes styleId');
+  ok(other.classList.contains('is-on'), 'stylerow: and the row marks it');
+
+  store.set({ styleId: before });
   if (screen.unmount) screen.unmount();
 }
 

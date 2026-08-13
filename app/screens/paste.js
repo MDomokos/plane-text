@@ -38,10 +38,13 @@
 //   someone sent you is a thing you act on. A thumbnail you TAP is a thing you
 //   are looking at again, and that stays here. Two gestures, two meanings.
 //
-//   The library picker still routes through capture with ?import=1. See the
-//   import sub-mode note in capture.js: an imported photo has no moment at which
-//   style can be chosen unless it gets a capture moment, and the alternative was
-//   a style row in the viewer, which would make styleId a two-owner field.
+//   The library picker used to route through capture with ?import=1, and as of
+//   2026-08-13 it does not: it goes to the viewer, which is where a captured
+//   photo lands. The detour existed to give an imported photo a moment at which
+//   style could be chosen, because the viewer had no style row and giving it one
+//   would have made styleId a two-owner field. app/stylerow.js owns the field
+//   now, so the viewer can carry the row and the sub-mode is retired. See
+//   capture.js's header.
 //
 //   The clipboard read is still gesture-triggered, with the textarea fallback.
 //   On iOS Safari navigator.clipboard.readText() requires a user gesture and
@@ -74,10 +77,11 @@ import { defineScreen } from '../screen.js';
 import { register } from '../router.js';
 import { currentStyle } from '../state.js';
 import { actionBar } from '../actionbar.js';
-import { paintArt, autoFit, publishArtWidth, stageArtWidth } from '../art.js';
+import { paintArt, autoFit, publishArtWidth, stageArtWidth, stillBox } from '../art.js';
 import { messageName, currentWord } from '../words.js';
 import * as recents from '../recents.js';
 import { thumbStrip } from '../thumbstrip.js';
+import { settingsGear } from '../gear.js';
 import { artefact } from '../artefact.js';
 import { photoPicker } from '../photopicker.js';
 import { decodeMessage, looksLikeMessage, setSubject, takeSharedText } from '../pipeline.js';
@@ -127,8 +131,14 @@ export default register(defineScreen({
     // DELETE is in the action row at the bottom now, beside SHARE and SAVE,
     // because it is one of the three things you can do to the picture on the
     // stage and it was the only one of the three this screen had. With it gone
-    // there is nothing to balance, both gutters are dead weight, and the name
-    // simply centres on the art the way .app-name already asks to.
+    // there was nothing to balance and the name simply centred on the art the
+    // way .app-name already asks to.
+    //
+    // The gear arrived in this band on 2026-08-13 (app/gear.js) and does not
+    // bring the grid back with it. It is absolutely positioned, so it takes a
+    // symmetric gutter on .app-name rather than a column of its own; a control
+    // that never changes label needs no ballast to balance against. See
+    // paste.css.
     //
     // The viewer keeps .app-chrome-row. Its delete is still up there, because
     // its bottom band is full -- 173 of 176 -- and there is nowhere for a fourth
@@ -141,6 +151,11 @@ export default register(defineScreen({
     label.className = 'app-name';
     top.append(label);
 
+    // Settings door. See app/gear.js. Absolutely positioned against the band, so
+    // the name stays centred on the art rather than on what is left after a
+    // corner glyph.
+    settingsGear(top, ctx);
+
     // --- stage -----------------------------------------------------------
     //
     // Three things can occupy it and exactly one does at a time: the picture,
@@ -152,7 +167,8 @@ export default register(defineScreen({
     stage.className = 'app-stage';
 
     const pre = document.createElement('pre');
-    pre.className = 'app-art';
+    // Framed unconditionally: every picture on this screen is a still.
+    pre.className = 'app-art is-framed';
     pre.setAttribute('role', 'img');
     pre.hidden = true;
 
@@ -354,7 +370,12 @@ export default register(defineScreen({
       // every navigation.
       publishArtWidth(stageArtWidth(w, h));
       if (!lines.length || !geom) return;
-      paintArt(pre, lines, geom, w, h);
+      // Inset and framed, as the viewer's is. Every picture on this
+      // screen is a still -- there is no live source anywhere near it -- so the
+      // hairline box is unconditional here, where the viewer has to turn it on.
+      // See STILL_INSET_PX in art.js.
+      const box = stillBox(w, h);
+      paintArt(pre, lines, geom, box.width, box.height);
     }
 
     const refit = autoFit(stage, draw, { signal: ctx.signal });
@@ -548,18 +569,20 @@ export default register(defineScreen({
           takenAt: Date.now(),
           source: 'library',
         });
-        // Through capture, not straight to the viewer. Changed 2026-08-09 and
-        // unchanged by the gallery rewrite.
+        // Straight to the viewer, where a captured photo lands too. Changed
+        // 2026-08-13.
         //
-        // Spec 5.1 and state.js justify the composer having no style picker
-        // with "style was chosen at capture". That was false for an imported
-        // photo: this picker dropped the user into `compose`, so a library
-        // import had no moment at which style could be chosen.
+        // This went through `capture?import=1` from 2026-08-09 until then. Spec
+        // 5.1 justified the composer having no style picker with "style was
+        // chosen at capture", false for an imported photo, so the import was
+        // given a capture moment: a frozen still in capture's interface with the
+        // shutter reading [ USE ]. The alternative -- a style row on the viewer
+        // -- was rejected for making styleId a two-owner field.
         //
-        // `?import=1` puts capture into its frozen sub-mode. The alternative
-        // was a style row in the viewer, which would make styleId a two-owner
-        // field and the ownership table wrong.
-        ctx.navigate('capture', { import: '1' });
+        // app/stylerow.js removes that objection. The field has a component
+        // owner, both picture screens mount the same row, and no screen writes
+        // it. See capture.js's header for what the sub-mode was.
+        ctx.navigate('compose');
       },
     });
 

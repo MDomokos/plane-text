@@ -1,0 +1,144 @@
+/* Plane Text: app/stylerow.js.
+ *
+ * Moved out of app/screens/capture.css on 2026-08-13, when styleId stopped
+ * being a screen's field and became a component's. The rules are unchanged --
+ * only the prefix, from .sc- (a screen's) to .pt- (a component's), matching
+ * app/sizeslider.css and app/thumbstrip.css.
+ *
+ * Everything defended below was written for capture's top band and holds for
+ * the viewer's, since it is the same 44px band.
+ * ========================================================================== */
+
+/* Style selector ----------------------------------------------------------- */
+
+/* No box and no pills: words with a hairline underline on the active one. The
+ * underline is the same 1px gold as everything else that marks a selection. */
+/* It scrolls, and the height is what makes that safe. Reworked 2026-08-09.
+ *
+ * Four codec names is 31 characters of monospace plus three gaps, and on a
+ * 390px phone minus two 44px corner gutters there is not room. The row was a
+ * plain centred flex line, so the overflow went nowhere: the ends were simply
+ * outside the box, unreachable, and partly under the gear.
+ *
+ * `safe center` is the whole reason this works. Plain `center` on an
+ * overflowing flex container overflows in BOTH directions, and overflow before
+ * the start edge is not scrollable in any engine -- so ART, the default and the
+ * first item, would be the one you could never reach. `safe` falls back to
+ * flex-start the moment the content stops fitting, which puts all of the
+ * overflow at the end where a scroll can get to it, and keeps the row centred
+ * on the art whenever it does fit, which is the common case.
+ *
+ * THE HEIGHT IS LOAD-BEARING. `overflow-x: auto` computes `overflow-y` from
+ * `visible` up to `auto`; there is no such thing as a box that scrolls in one
+ * axis and overflows in the other. So the moment this row scrolls, it also
+ * clips vertically -- and what sticks out vertically here is the ::before that
+ * turns a 20px word into a 44px target. Left at its content height of 20px,
+ * making the row scrollable would have quietly cut every tap target in this row
+ * back to 20px: a fix for a layout bug that breaks the accessibility hack the
+ * next rule down spends twenty lines defending.
+ *
+ * Pinning it to --pt-tap makes the scroll box exactly as tall as the hit boxes
+ * it contains, so nothing is clipped. It fits the band because the band is
+ * --pt-tap too; see --pt-chrome-top in tokens.css, which was sized for this row
+ * at the tap minimum in the first place.
+ *
+ * The scrollbar is hidden, against the app's habit of showing maybe-rain's gold
+ * bar. A 6px bar inside a 44px band sits directly on top of the hit boxes, and
+ * this row's primary control is a swipe on the picture below it. */
+.pt-styles {
+  display: flex;
+  justify-content: safe center;
+  align-items: center;
+  gap: var(--pt-space-3);
+
+  min-width: 0;
+  height: var(--pt-tap);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* The row is a readout first. A drag on it should scroll it, not be stolen by
+   * the page, and nothing else here wants the horizontal axis. */
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+}
+.pt-styles::-webkit-scrollbar { display: none; }
+
+/* The word. 12px type, and a 44px target.
+ *
+ * The row is a readout that happens to be tappable, since the swipe on the
+ * picture is the primary control. That is not a licence to ship a 19px target,
+ * which is what this was: `padding: 4px 2px 3px` on `line-height: 1` at 12px.
+ * actionbar.js throws rather than render a 43px slot, and this was the same
+ * rule broken in the same app on the control touched second-most.
+ *
+ * The hit box grows via a ::before with negative insets rather than by growing
+ * the row, which is maybe-rain's trick for its gesture rails. Growing the row
+ * would push the band taller, and the band is a fixed reserved height that
+ * every other screen is sized against. So the visible word stays 19px and the
+ * thing your thumb hits is 44.
+ *
+ * The pseudo-element is on the button, so it is inside the button's own hit
+ * testing, so no z-index games, and nothing overlaps the picture below since
+ * the band is 44px and the overflow is centred within it. */
+.pt-style {
+  position: relative;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;   /* single-sided borders never get a radius */
+  padding: var(--pt-space-1) 2px 3px;
+  color: var(--pt-ink-faint);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: var(--pt-track);
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--pt-dur-base) ease;
+  /* Stops a rapid double-tap on a word from zooming the page on iOS, which
+   * fires on a control this small and reads as the app breaking. */
+  touch-action: manipulation;
+}
+
+.pt-style::before {
+  content: '';
+  position: absolute;
+  /* 44px target, and the two vertical numbers are different on purpose.
+   *
+   * `inset` on an absolutely positioned child resolves against its containing
+   * block's PADDING box, not its border box. .pt-style is 20px tall
+   * (4 padding-top + 12 line + 3 padding-bottom + 1 border-bottom) but its
+   * padding box is 19, because the border-bottom is outside it. The original
+   * -12.5px all round was written against that 19 and was right: 19 + 25 = 44.
+   *
+   * A symmetric -12px was tried here first, on the arithmetic 20 + 12 + 12, and
+   * measured 43px in the browser -- the exact number actionbar.js throws over,
+   * introduced by a comment that trusted the border box.
+   *
+   * Symmetric is still not what is wanted, because the row above is now a
+   * scroll box pinned to exactly --pt-tap and anything hanging outside it is
+   * clipped rather than merely invisible. Centred in that 44px box the button's
+   * border box sits at y=12..32, so its padding box sits at 12..31: 12px of
+   * room above and 13px below. Asking for -12.5 both ways would put half a
+   * pixel of the target outside the box at each end and lose it.
+   *
+   * So: 12 above, 13 below, 19 + 12 + 13 = 44, landing on y=0..44 exactly.
+   *
+   * Horizontal is half the row's gap on each side, so adjacent words tile their
+   * hit boxes without overlapping. */
+  top: -12px;
+  bottom: -13px;
+  left: calc(var(--pt-space-3) / -2);
+  right: calc(var(--pt-space-3) / -2);
+}
+
+.pt-style:hover { color: var(--pt-ink-dim); }
+.pt-style.is-on { color: var(--pt-accent); border-bottom-color: var(--pt-accent); }
+
+
+/* SWAPPED OUT, on the viewer. See the `centre` cell in compose.js.
+ *
+ * `display: none` rather than the `visibility` sizeslider.css uses for the same
+ * job. That one reserves a row nothing else wants; this hands its grid cell to
+ * the name line, and a row that only went invisible would sit on top of it. */
+.pt-styles[hidden] { display: none; }

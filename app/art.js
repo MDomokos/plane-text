@@ -88,6 +88,50 @@ export function stageArtWidth(boxW, boxH, aspect = CAPTURE_ASPECT) {
   return Math.min(boxW, boxH * aspect);
 }
 
+// THE STILL'S INSET. Added 2026-08-13.
+//
+// A live view bleeds to the edge of its box; a still steps back and acquires a
+// hairline. That is the mode indicator the pinned art box made necessary: once
+// the picture is the same size in the same place on the viewfinder and the
+// viewer, nothing about the chrome distinguishes them. The other half is the
+// corner brackets on capture; see the `frame` note in capture.js.
+//
+// 16px each side, costing 32px of width in the mode where you are no longer
+// framing anything.
+//
+// BOTH AXES. The horizontal inset is subtracted here and applied by shrinking
+// the fit; the vertical inset is subtracted here AND applied as a margin in
+// .app-art.is-framed, because .app-stage is top-aligned and a height the art
+// does not use would pool at the bottom. The two have to agree, so the 16px in
+// shell.css and STILL_INSET_PX here are pinned to each other by a test.
+//
+// A CONSTANT HERE RATHER THAN A PADDING IN CSS. autoFit() measures the stage
+// with getBoundingClientRect(), which includes padding, so a stage that inset
+// itself in CSS would hand paintArt() the outer width and the art would fit to a
+// box 32px wider than the one it is drawn in. Every screen that insets subtracts
+// this from the numbers it fits with, and this is where the number lives.
+//
+// --pt-art-w is NOT reduced by it. That token is what the chrome clamps to, and
+// the chrome belongs to the reserved box rather than to the picture inside it.
+// Narrowing the action bar by 32px whenever you look at a still is the
+// resizing-chrome bug the whole mechanism exists to stop.
+export const STILL_INSET_PX = 16;
+
+// The border the hairline box draws with, subtracted so the art fits INSIDE it.
+// One pixel each side, and `* { box-sizing: border-box }` does not help here:
+// the <pre> is width:max-content, so its intrinsic width is its content and the
+// border is added outside it.
+export const STILL_BORDER_PX = 1;
+
+// The box a still gets, from the box the stage has.
+export function stillBox(boxW, boxH) {
+  const chrome = (STILL_INSET_PX + STILL_BORDER_PX) * 2;
+  return {
+    width: Math.max(1, boxW - chrome),
+    height: Math.max(1, boxH - chrome),
+  };
+}
+
 // Publish the art width so the chrome can clamp to it.
 //
 // Set on the document element rather than passed down, because the action bar

@@ -39,9 +39,10 @@
  *
  * It fills the stage rather than sitting centred in it, which is what "large
  * full screen paste button" means and also what makes it the one target on the
- * screen you cannot miss. .app-stage is a centring flex row, so this has to
- * stretch itself: `align-self: stretch` for the cross axis, `flex: 1 1 auto` for
- * the main one.
+ * screen you cannot miss. .app-stage is a top-aligned flex row (it was a
+ * centring one until 2026-08-13; see shell.css), so this has to stretch itself
+ * either way: `align-self: stretch` for the cross axis, `flex: 1 1 auto` for the
+ * main one.
  *
  * The padding is the frame gutter every other screen gets from .app-screen,
  * which this route no longer has. It is applied here rather than on .app-stage
@@ -249,7 +250,19 @@
   width: 100%;
   max-width: var(--pt-art-w);
   margin-inline: auto;
-  padding-inline: var(--pt-space-4);
+  /* A --pt-tap gutter each side, not --pt-space-4. Widened 2026-08-13, when the
+   * settings gear arrived in this band (app/gear.js).
+   *
+   * The gear is one --pt-tap square in the right corner, absolutely positioned,
+   * so it does not participate in layout and without a gutter the name runs
+   * underneath it. .app-name centres its text, so both gutters are needed even
+   * though only one corner is occupied: padding on the right alone would clear
+   * the glyph and shift the text off the centre of the picture.
+   *
+   * --pt-tap for the control plus --pt-space-3 for the offset it is pinned at:
+   * a bare --pt-tap leaves 12px of the button's box over the text. capture's row
+   * shipped with a style word disappearing under the same glyph. */
+  padding-inline: calc(var(--pt-tap) + var(--pt-space-3));
 }
 
 /* Errors ------------------------------------------------------------------- */

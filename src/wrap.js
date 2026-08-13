@@ -125,6 +125,31 @@ const SHIM =
   'b.style.height=H+"px"' +
   '})()';
 
+// The <title>, and therefore the filename the recipient's browser offers when
+// they save the page. Added 2026-08-13.
+//
+// A bare `zap 20260809 1432` tells the recipient nothing about what they have,
+// and this is the only string in the message a human reads as prose. The prefix
+// names the format the way the wire magic PLANETEXT1 does.
+//
+// It stays prose rather than a slug -- app/words.js's argument, and right --
+// because sort order barely matters on the receiving side, where there is one
+// file rather than a folder of them. The sender's copy has to sort, and
+// app/words.js fileName() makes that one date-first.
+//
+// Applied here rather than at the call site so wrapperCost() in encode.js
+// measures the string this emits. A prefix added downstream would not be
+// counted, and the budget would run 13 characters optimistic on every
+// message.
+export const TITLE_PREFIX = 'Plane Text';
+
+export function titleFor(name) {
+  const raw = String(name ?? '').trim();
+  if (!raw || raw === TITLE_PREFIX) return TITLE_PREFIX;
+  if (raw.startsWith(TITLE_PREFIX + ' — ')) return raw;
+  return `${TITLE_PREFIX} — ${raw}`;
+}
+
 export function wrap(rows, { codec, cols, rows: nRows, invert = INVERT_DEFAULT, stroke = null, ramp = null, title = 'Plane Text' }) {
   const cell = CELL_DOTS[codec];
   if (!cell) throw new Error(`unknown codec ${codec}`);
@@ -185,7 +210,7 @@ export function wrap(rows, { codec, cols, rows: nRows, invert = INVERT_DEFAULT, 
   const html =
     '<!doctype html><meta charset=utf-8>' +
     '<meta name=viewport content="width=device-width,initial-scale=1">' +
-    '<title>' + title + '</title>' +
+    '<title>' + titleFor(title) + '</title>' +
     '<style>' +
     'html,body{margin:0;background:' + bg + ';overflow-x:hidden}' +
     '#b{overflow:hidden}' +

@@ -310,10 +310,28 @@ body[data-route="paste"] .app-screen { padding-top: var(--pt-safe-top); }
 .app-chrome-bot { justify-content: flex-start; padding-top: var(--pt-space-1); }
 
 /* The stage. Every picture in this app is drawn inside one of these, at the
- * same size, in the same place. */
+ * same size, in the same place.
+ *
+ * TOP-ALIGNED, NOT CENTRED. Changed 2026-08-13.
+ *
+ * `align-items: center` was here from the start and is correct for everything
+ * this app captures: a capture is cropped to CAPTURE_ASPECT, --pt-art-w derives
+ * from the same constant, so the art fills the stage's height and centring and
+ * top-aligning agree to the pixel.
+ *
+ * They part on a RECEIVED message, which carries whatever grid the sender's app
+ * produced and need not be 3:4. A taller-than-3:4 message is width-bound and
+ * shorter than the stage, so a centred one sits lower than every picture beside
+ * it in the strip, and swiping the carousel moves the top edge by half the
+ * difference. That is the 45px jump this band was built to kill, on the axis
+ * nobody measured, because everything anyone measured was a 3:4 capture.
+ *
+ * Pinning the top edge instead: the art starts at a fixed y on every screen and
+ * every aspect, and a short picture leaves its slack at the bottom against the
+ * chrome band. */
 .app-stage {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   overflow: hidden;
   background: var(--pt-art-bg);
@@ -340,6 +358,36 @@ body[data-route="paste"] .app-screen { padding-top: var(--pt-safe-top); }
  * carousel swipe is bound to the stage, and a <pre> that swallowed the
  * pointerdown would make the gesture dead in the middle of the picture, which is
  * where it is made. */
+/* A STILL IS FRAMED. Added 2026-08-13.
+ *
+ * Half of the mode indicator. The other half is .sc-frame on capture, and the
+ * argument for needing one at all is at STILL_INSET_PX in art.js.
+ *
+ * THE INSET IS NOT HERE. It is STILL_INSET_PX in art.js, subtracted from the box
+ * before paintArt() fits to it, because autoFit() measures the stage's border
+ * box: a padding declared in CSS is included in that measurement, and the art
+ * would fit to a box 32px wider than the one it is drawn in. What is here is
+ * only the hairline the space makes room for.
+ *
+ * 2px radius, the app's one radius, on its one element that is not a control.
+ * The corner brackets it replaces have none.
+ *
+ * Unconditional on the gallery, where everything is a still. The viewer turns it
+ * on, since the viewer is the only screen that ever showed a live source. */
+.app-art.is-framed {
+  border: 1px solid var(--pt-line);
+  border-radius: var(--pt-radius);
+  /* THE STEP BACK IS VERTICAL TOO. The horizontal half comes out of the box
+   * before the fit (stillBox() in art.js); this is the vertical half, and it has
+   * to be a margin rather than a subtraction because the stage is top-aligned.
+   * Subtracting the height alone leaves a width-bound still flush against the
+   * chrome band with its slack below it, stepping back on three sides only.
+   *
+   * 16px MUST EQUAL STILL_INSET_PX in art.js. One number in two files, which is
+   * how this project's five recorded drifts started, so a test greps both. */
+  margin: 16px 0;
+}
+
 .app-art {
   margin: 0;
   width: max-content;
@@ -381,6 +429,28 @@ body[data-route="paste"] .app-screen { padding-top: var(--pt-safe-top); }
 .app-chrome-row {
   display: grid;
   grid-template-columns: calc(var(--pt-tap) * 2) 1fr calc(var(--pt-tap) * 2);
+}
+
+/* THE BALLAST COLUMN IS FOR THE NAME. Added 2026-08-13.
+ *
+ * The third column matches the first so the centre stays centred on the PICTURE
+ * rather than on what is left after the delete button. That is worth 88px when
+ * the centre holds a name.
+ *
+ * Not when it holds the style row. A scroll box wants width, not symmetry, and
+ * 88px of ballast took the row to `--pt-art-w - 176`: 93px on a 375x667 phone
+ * against the 181px the same row gets on capture. One word visible.
+ *
+ * So in that state the column shrinks to what the gear occupies, --pt-tap plus
+ * the offset it is pinned at. The row stops being centred on the art and does
+ * not need to be: `justify-content: safe center` (stylerow.css) centres it when
+ * it fits and falls back to flex-start when it does not, which is what capture
+ * gets too. */
+.app-chrome-row.is-styling {
+  grid-template-columns: calc(var(--pt-tap) * 2) 1fr calc(var(--pt-tap) + var(--pt-space-3));
+}
+
+.app-chrome-row {
   align-items: center;
   min-height: var(--pt-tap);
 
@@ -631,3 +701,78 @@ body[data-route^="settings/"] .app-bottom:not(:empty) {
   ::view-transition-old(*),
   ::view-transition-new(*) { animation: none !important; }
 }
+
+/* The settings door -------------------------------------------------------- */
+
+/* app/gear.js, on every picture screen's top band. Moved out of capture.css on
+ * 2026-08-13, where it was .sc-gear and served one screen.
+ *
+ * Absolutely positioned so it does not push the band's centre content off the
+ * middle of the picture: the style row on capture and the name on the viewer are
+ * the things that must be centred on the ART, and a glyph in the corner is a
+ * corner glyph. Every band that hosts one therefore has to be a containing block
+ * -- .sc-top-row already is, and .app-chrome-top is made one below. */
+.app-gear {
+  position: absolute;
+  /* CLAMPED TO THE ART, NOT TO THE BAND. Corrected 2026-08-13, before shipping.
+   *
+   * `right: var(--pt-space-3)` shows its error only on a HEIGHT-BOUND stage. The
+   * band is full viewport width; everything it holds -- .app-chrome-row on the
+   * viewer, .app-name on the gallery -- is clamped to --pt-art-w and centred.
+   * The two right edges coincide only when the stage is width-bound: true on a
+   * 390x844 phone, false on a 375x667 one, where --pt-art-w is 269 against a
+   * 343px band.
+   *
+   * Uncorrected that is the bug capture.css records and fixed with a gutter --
+   * measured on the deployed build, HALFTONE under the gear glyph -- arriving on
+   * two more screens by anchoring to the wrong box.
+   *
+   * The art's right edge sits at 50% + min(50%, --pt-art-w / 2), so the offset
+   * from the band's right edge is the complement of that plus the gutter.
+   *
+   * On capture the gear is inside .sc-top-row, which is itself art-clamped, so
+   * min() picks 50% and the term collapses to the gutter alone -- no double
+   * inset there. */
+  right: calc(50% - min(50%, var(--pt-art-w) / 2) + var(--pt-space-3));
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--pt-tap);
+  height: var(--pt-tap);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  border-radius: var(--pt-radius);
+  color: var(--pt-ink-faint);
+  font-family: inherit;
+  font-size: var(--pt-size-xs);
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: color var(--pt-dur-base) ease;
+  touch-action: manipulation;
+}
+.app-gear:hover { color: var(--pt-ink-dim); }
+
+/* The offline dot. Same size and colour as the clipboard dot the action bar
+ * hangs on OPEN (actionbar.css); see app/gear.js for what it means. It is the
+ * only gold on these screens besides the style row's underline, and the two are
+ * never in the same corner.
+ *
+ * Hung off the glyph's top-right rather than set beside it, so the control stays
+ * exactly --pt-tap and the band's arithmetic does not move. */
+.app-gear-dot {
+  position: absolute;
+  top: 10px;
+  right: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--pt-accent);
+}
+.app-gear-dot[hidden] { display: none; }
+
+/* The two bands that host a corner control have to be containing blocks for it.
+ * capture builds its own row (.sc-top-row) and already is one; the viewer and
+ * the gallery hang the gear directly off the band. */
+.app-chrome-top { position: relative; }

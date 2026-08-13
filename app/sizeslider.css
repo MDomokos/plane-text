@@ -71,12 +71,26 @@
  *      written out twice below. This is not duplication that can be tidied.
  * ========================================================================== */
 
+/* FULL ART-BOX WIDTH. Changed 2026-08-13.
+ *
+ * This was inset --pt-space-5 (24px) each side, so the track was 48px narrower
+ * than the picture above it and the readout above that. Nothing required it; it
+ * was the width the control happened to ship at, and the point of the pinned art
+ * box is that the chrome stops having a second width.
+ *
+ * The endpoint tick labels are pinned inside the ends (.pt-tick:first-child
+ * below), so widening does not push them off.
+ *
+ * --pt-slider-fill is published by sizeslider.js paint(). The fallback leaves
+ * the track a plain hairline if the property is missing, rather than painting it
+ * fully gold. */
 .pt-slider {
   position: relative;
   flex: none;
-  width: calc(100% - var(--pt-space-5) * 2);
-  max-width: calc(var(--pt-art-w) - var(--pt-space-5) * 2);
+  width: 100%;
+  max-width: var(--pt-art-w);
   margin: 0 auto;
+  --pt-slider-fill: 0%;
 }
 .pt-slider[hidden] { display: none; }
 
@@ -128,16 +142,40 @@
 .pt-slider-input[hidden] { display: none; }
 
 /* Track. A hairline, the same one every structural rule in the app draws
- * from. */
+ * from, with the portion left of the thumb in --pt-accent at the same 1px.
+ *
+ * The fill says "this much" where the thumb alone says only "here". It is the
+ * one place the accent is a quantity rather than a state, and it costs no
+ * height: same rule, two colours.
+ *
+ * Firefox has ::-moz-range-progress and WebKit has no equivalent, so WebKit gets
+ * a hard-stop linear-gradient at --pt-slider-fill, published by sizeslider.js.
+ * Both stops sit at the SAME percentage: a 0.1% band would read as a soft edge
+ * on a 1px rule.
+ *
+ * The two blocks stay separate. See note 2 at the top of this file: an unknown
+ * pseudo-element invalidates the whole selector list in both engines. */
 .pt-slider-input::-webkit-slider-runnable-track {
   height: 1px;
-  background: var(--pt-line);
+  background: linear-gradient(
+    to right,
+    var(--pt-accent) 0,
+    var(--pt-accent) var(--pt-slider-fill),
+    var(--pt-line) var(--pt-slider-fill),
+    var(--pt-line) 100%
+  );
   border: 0;
   border-radius: 0;   /* a 1px rule with a radius is a 1px rule */
 }
 .pt-slider-input::-moz-range-track {
   height: 1px;
   background: var(--pt-line);
+  border: 0;
+  border-radius: 0;
+}
+.pt-slider-input::-moz-range-progress {
+  height: 1px;
+  background: var(--pt-accent);
   border: 0;
   border-radius: 0;
 }

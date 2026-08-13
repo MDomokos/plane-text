@@ -58,6 +58,14 @@
  * of 176 and never counted this. With it gone and the strip at its shared size
  * the band comes to 172, and the 4px of slack is what the strip's `margin-top:
  * auto` spends pinning itself to the bottom. */
+/* ONE LINE, ALWAYS. Added 2026-08-13, and this one could wrap before the name
+ * moved anywhere.
+ *
+ * The warn string is `103 columns · the recipient will need to zoom`, 44
+ * characters at --pt-size-sm, about 370px of mono against a --pt-art-w of 269 on
+ * a 375x667 phone. A wrap costs 21px in a fixed 176px `overflow: hidden` band
+ * with four pixels of slack, clipping the status line below it -- and this
+ * string only appears when the app is trying to warn you. */
 .sc-view-fit {
   flex: none;
   width: 100%;
@@ -66,12 +74,33 @@
   text-align: center;
   font-size: var(--pt-size-sm);
   color: var(--pt-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sc-view-fit.is-warn { color: var(--pt-warn); }
 
 /* The character count is secondary and quiet. No fill bar: at a third of the
  * ceiling it would say "you have loads of room", which is true and misleading,
- * since the room cannot be spent on a bigger picture. */
+ * since the room cannot be spent on a bigger picture.
+ *
+ * ONE LINE, ALWAYS, for the reason above. Added 2026-08-13, with the name.
+ *
+ * This carried `4,532 characters` and now carries
+ * `zap 20260809 1432 / shot / 4,532 chars`, because the top band belongs to the
+ * style row whenever the picture is one of yours. That is 16 characters to
+ * nearly 40, against a --pt-art-w of 269 on a 375x667 phone, which wraps.
+ *
+ * The band is a fixed 176px with `overflow: hidden` (see the budget note above)
+ * and four pixels of slack, so an extra 18px line pushes the status line out of
+ * the bottom of it. That failure is recorded in this file already, from the last
+ * time it happened.
+ *
+ * Hence the three rules that make an overflow impossible, the same three
+ * .app-name carries. The count is last, so it is what an ellipsis eats on the
+ * narrowest screens: the fit line above is the primary metric (spec 5.2), this
+ * is the secondary readout, and the name identifies which of eight pictures is
+ * on the stage. */
 .sc-view-chars {
   flex: none;
   width: 100%;
@@ -80,6 +109,9 @@
   text-align: center;
   font-size: var(--pt-size-xs);
   color: var(--pt-ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Slider ------------------------------------------------------------------- */
@@ -126,3 +158,16 @@
  * `.sc-view.is-dimmed > ...`, keyed on this screen's own class, so the gallery
  * would have opened the same sheet over an undimmed, still-tappable picture. It
  * is keyed on `.is-dimmed` and the shell's three band classes now. */
+
+/* The top band's middle cell. It holds two things that are never both on: the
+ * style row when the stage shows the live subject, the name line when it shows a
+ * received message from the carousel. compose.js's `centre` note has the
+ * arithmetic for why they swap rather than stack.
+ *
+ * min-width: 0 so the column can be narrower than the style row's content. The
+ * row is a scroll box (.pt-styles) and a grid item defaults to a content-based
+ * minimum, which would push the fixed 88px delete column off the end on a narrow
+ * phone. .app-name already carries the same rule, now one level down. */
+.sc-view-top-centre {
+  min-width: 0;
+}

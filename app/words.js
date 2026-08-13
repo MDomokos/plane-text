@@ -7,10 +7,28 @@
 // rather than mislabelling itself.
 //
 // The word also names the message. `kachunk 20260809 1432` labels the recents
-// strip, and it is the wrapper <title>, so it becomes the filename the
-// recipient gets when they save the page.
+// strip, and it is the basis of the wrapper <title>, so it becomes the filename
+// the recipient gets when they save the page.
 //
-// Three consequences of that:
+// TWO NAMES, TWO READERS. Added 2026-08-13. messageName() and fileName() used to
+// agree, and this header claimed one name served both the title and the file. It
+// does not: the two are read by different people in different places.
+//
+//   in the app   `zap 20260809 1432`   word first. At 46px the art is texture
+//                                      and the word is the only thing that
+//                                      identifies an entry, and it is the token
+//                                      people say out loud. Date first would put
+//                                      `2026` under every thumbnail.
+//   on disk      `planetext_20260809-1432_zap.txt`
+//                                      date first. A folder of these sorts
+//                                      chronologically, which is the only
+//                                      ordering anyone wants for photographs.
+//                                      The prefix says what the file is -- a
+//                                      .txt full of braille is otherwise
+//                                      unidentifiable in a Downloads folder --
+//                                      and echoes the wire magic PLANETEXT1.
+//
+// Three consequences of the word naming the message:
 //
 //   1. The list is a payload surface. These words go into the message, so they
 //      go through lintPayload() like everything else: no * _ ~ ` < > &. The
@@ -82,6 +100,9 @@ function readCursor() {
 // previously carried no metadata. Date alone would leak less and collide
 // sooner; time was chosen 2026-08-09 because "which of these two" is the
 // question the name has to answer.
+//
+// Word first, and it stays word first. fileName() below reverses the order and
+// that is not drift -- see the two-names note at the top of this file.
 export function messageName(word, at = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
   const date = `${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}`;
@@ -89,10 +110,43 @@ export function messageName(word, at = new Date()) {
   return `${String(word).toLowerCase()} ${date} ${time}`;
 }
 
-// A filename for a saved export. The name is already filesystem-safe by
-// construction (lowercase letters, digits, spaces), but a custom word list
-// would not be, so this is the one place that guarantees it.
+// `planetext_20260809-1432_zap.txt`.
+//
+// Takes a messageName() string and turns it inside out: format prefix, then the
+// date and time joined by a hyphen so the stamp is one token, then the word.
+// Underscores and hyphens only, never spaces -- the old output had them, which
+// survives on macOS and is friction everywhere else.
+//
+// The word survives the reordering because it is the spoken handle, and because
+// it disambiguates two captures inside the same minute. The rotation guarantees
+// consecutive captures differ.
+//
+// A NAME THAT IS NOT ONE OF OURS still has to produce a file. A received
+// message carries whatever name the sender's app gave it, and after a custom
+// word list (spec 5.1, charset editor) even our own names carry user-supplied
+// text. So the parse is a fast path, not a precondition: anything that does not
+// match falls through to the same sanitiser the old implementation used, with
+// spaces folded to underscores rather than kept. This function stays the one
+// place that guarantees a filesystem-safe result.
+const NAME_RE = /^([a-z0-9]+)\s+(\d{8})\s+(\d{4})$/i;
+
 export function fileName(name, ext) {
-  const safe = String(name).replace(/[^a-z0-9 ]/gi, '').trim() || 'plane text';
-  return `${safe}.${ext}`;
+  const raw = String(name).trim();
+  const m = NAME_RE.exec(raw);
+  if (m) {
+    const [, word, date, time] = m;
+    return `planetext_${date}-${time}_${word.toLowerCase()}.${ext}`;
+  }
+  const safe = raw
+    .replace(/[^a-z0-9]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase() || 'untitled';
+  return `planetext_${safe}.${ext}`;
 }
+
+// The <title> the wrapper carries -- and therefore the filename the RECIPIENT
+// gets when their browser saves the page -- is NOT built here. It is
+// `Plane Text — zap 20260809 1432`, prose rather than a slug, and src/wrap.js
+// applies the prefix because src/ is below app/ in the import graph and because
+// the wrapper's own character budget has to measure the string it actually
+// emits. See titleFor() there. messageName() feeds it unchanged.

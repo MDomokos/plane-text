@@ -2,15 +2,27 @@
 //
 // A picture you just shot, one you picked from the library, and one someone
 // sent you are the same thing on screen: full-bleed art, a name, and back /
-// save / share. Two things differ, and both follow from one fact, that a
+// save / share. Three things differ, and all three follow from one fact, that a
 // received message is already encoded and there is nothing left to decide
 // about it:
 //
 //   the size slider   present for yours, absent for theirs
+//   the style row     present for yours, absent for theirs
 //   the fit readout   "103 columns, fits a phone" against "received"
 //
 // That is why this file serves the `compose` route and the paste screen
 // navigates here rather than to a viewer of its own.
+//
+// THE STYLE ROW ARRIVED HERE ON 2026-08-13, and retired capture's import
+// sub-mode with it. A library import used to detour through `capture?import=1`
+// so style could be chosen before the picture reached this screen -- a frozen
+// still wearing the camera's interface, which is a second copy of this screen.
+// It is app/stylerow.js instead, which owns styleId so that mounting it on two
+// screens does not make the field two-owner. This screen writes styleId no more
+// than it writes sizeChars; a grep in test/planetext.test.js keeps both true.
+//
+// Beyond the import path: style is changeable after the fact for a photograph
+// you shot, not only one you picked. Not the goal, but a consequence.
 //
 // The double-tap hazard. The action bar's primary slot never moves, and
 // arriving here from a shutter tap leaves the thumb over it. It was SHOOT a
@@ -68,8 +80,10 @@ import { register } from '../router.js';
 import { currentStyle, currentCols } from '../state.js';
 import { actionBar } from '../actionbar.js';
 import { sizeSlider } from '../sizeslider.js';
+import { styleRow } from '../stylerow.js';
+import { settingsGear } from '../gear.js';
 import { artefact } from '../artefact.js';
-import { paintArt, autoFit, publishArtWidth, stageArtWidth } from '../art.js';
+import { paintArt, autoFit, publishArtWidth, stageArtWidth, stillBox } from '../art.js';
 import { messageName } from '../words.js';
 import * as recents from '../recents.js';
 import { thumbStrip } from '../thumbstrip.js';
@@ -195,8 +209,54 @@ export default register(defineScreen({
     const label = document.createElement('p');
     label.className = 'app-name';
 
-    topRow.append(delSlot, label);
+    // THE STYLE ROW AND THE NAME SHARE ONE CELL. They swap; they do not stack.
+    // Decided 2026-08-13, on arithmetic rather than taste.
+    //
+    // The row is --pt-tap, 44px, the same as capture's. Both of this screen's
+    // bands are full: 44px exactly on top, and 176 below of which 121 is fixed
+    // chrome and 55 is the filmstrip, which has a 48px floor
+    // (--pt-thumb-min-h). There is nowhere to put 44 more pixels. Growing
+    // --pt-chrome-top to 88 fits and costs 26px of picture on a 390x844 phone --
+    // the stage carries 18px of headroom over the 520px a full-width 3:4 art
+    // needs -- on every screen at once, since the token is shared. See
+    // tokens.css for how often that trade has been refused.
+    //
+    // Swapping costs nothing, since the two are never both applicable. The style
+    // row needs source pixels, which only the live subject has; the name
+    // describes whatever is on the stage. Swiping the carousel onto somebody
+    // else's message turns the row off and the name on, in the same motion that
+    // empties the size slider and for the same reason.
+    //
+    // The delete control keeps the left cell throughout. It acts on whatever is
+    // on the stage, which holds in both states, and it is destructive, so it
+    // stays in the hard-to-reach corner rather than moving.
+    //
+    // What the swap costs is the name on your own photograph. render() puts it
+    // in the bottom band's second readout.
+    const centre = document.createElement('div');
+    centre.className = 'sc-view-top-centre';
+    const styleCtl = styleRow(centre, ctx, {
+      // The tap re-encodes a full-resolution still and refits the <pre>, which
+      // is tens of milliseconds and rewrites the message about to be shared.
+      // capture's costs a preview repaint. See the flag's note in stylerow.js.
+      live: false,
+      onChange: (style) => say(style.name.toUpperCase()),
+    });
+    centre.append(label);
+
+    topRow.append(delSlot, centre);
     top.append(topRow);
+
+    // Settings door. See app/gear.js.
+    //
+    // Hung off the BAND rather than the row. The row is .app-chrome-row, a
+    // three-column grid whose outer two are fixed and equal so the centre stays
+    // centred on the picture; a fourth child would add a fourth column and shift
+    // the centre by half a gear. Absolutely positioned against the band instead,
+    // which is why .app-chrome-top is a containing block (shell.css), it lands
+    // in the right-hand ballast column -- which until now existed only to match
+    // the width of the delete slot.
+    settingsGear(top, ctx);
 
     // --- stage -----------------------------------------------------------
     const stage = document.createElement('div');
@@ -204,7 +264,11 @@ export default register(defineScreen({
     const pre = document.createElement('pre');
     // The <pre> rule is the shell's as of 2026-08-09, because the gallery paints
     // into the same object. See .app-art in shell.css.
-    pre.className = 'app-art';
+    // Framed from the first paint. This screen never shows a live source -- the
+    // viewfinder is the screen you arrive from -- so the transition between the
+    // two states belongs to capture's shutter, not here. See
+    // .app-art.is-framed in shell.css.
+    pre.className = 'app-art is-framed';
     pre.setAttribute('role', 'img');
     stage.append(pre);
 
@@ -384,11 +448,18 @@ export default register(defineScreen({
 
     function draw(w, h) {
       // The chrome's clamp comes from the RESERVED box, not from what was just
-      // painted. See art.js: publishing the measured width is what made the
-      // action bar and the save sheet resize on every navigation.
+      // painted, and not from the inset box below either. See art.js:
+      // publishing the measured width is what made the action bar and the save
+      // sheet resize on every navigation, and reducing it by the still's inset
+      // would reintroduce that on a smaller scale.
       publishArtWidth(stageArtWidth(w, h));
       if (!lines.length || !geom) return;
-      paintArt(pre, lines, geom, w, h);
+      // A STILL IS INSET AND FRAMED. See STILL_INSET_PX in art.js for the
+      // argument; what matters here is that the inset is subtracted BEFORE the
+      // fit, because autoFit measures the stage's border box and paintArt fits
+      // to whatever it is handed.
+      const box = stillBox(w, h);
+      paintArt(pre, lines, geom, box.width, box.height);
     }
 
     const refit = autoFit(stage, draw, { signal: ctx.signal });
@@ -399,6 +470,19 @@ export default register(defineScreen({
       label.textContent = `${viewName} · ${viewSource}`;
       ctx.setTitle(viewName);
 
+      // The top band's swap. See the note where `centre` is built.
+      //
+      // The same condition as the slider's: both controls need source pixels and
+      // both are meaningless on a message that is already encoded. Computed once
+      // and read twice, so the two cannot disagree about which picture is live.
+      const liveSubject = mine && onLive;
+      styleCtl.el.hidden = !liveSubject;
+      label.hidden = liveSubject;
+      // And the row's third column shrinks with it. It is ballast that keeps a
+      // NAME centred on the picture; a scrolling style row wants the width
+      // instead. See .app-chrome-row.is-styling in shell.css.
+      topRow.classList.toggle('is-styling', liveSubject);
+
       // Absent, not disabled, for a received message: it is already encoded and
       // there is nothing left to choose. setHidden() puts the attribute on the
       // wrapper and on the input, because those are two rules in
@@ -406,7 +490,7 @@ export default register(defineScreen({
       // control that half exists. This screen is the only caller: capture's
       // slider is never hidden, because the viewfinder always has a size to
       // choose.
-      const sliderOn = mine && onLive;
+      const sliderOn = liveSubject;
       sizeCtl.setHidden(!sliderOn);
 
       if (sliderOn) {
@@ -418,7 +502,15 @@ export default register(defineScreen({
           ? `${cols} columns · the recipient will need to zoom`
           : `${cols} columns · fits a phone`;
         fit.classList.toggle('is-warn', Boolean(warned));
-        chars.textContent = `${(encoded ? encoded.stats.messageChars : s.sizeChars).toLocaleString()} characters`;
+        // THE NAME IS HERE WHEN THE STYLE ROW HAS THE TOP BAND. This read just
+        // the character count; the name and provenance were the top band's job,
+        // and in this state the top band is the style row's. The count it
+        // displaces was already in context from the fit line above.
+        // `chars`, not `characters`. Six fewer characters on a line that has to
+        // fit --pt-art-w on a 375px phone, and it is the word capture's readout
+        // has always used -- so the two screens now agree rather than one being
+        // formal about it.
+        chars.textContent = `${viewName} · ${viewSource} · ${(encoded ? encoded.stats.messageChars : s.sizeChars).toLocaleString()} chars`;
         // The thumb follows anything that moved sizeChars without going through
         // the control: a mount that inherited a persisted value, or the other
         // screen's slider between two visits. sync() is a no-op when they
@@ -428,7 +520,7 @@ export default register(defineScreen({
       } else {
         fit.textContent = `${geom ? geom.cols : 0} columns`;
         fit.classList.remove('is-warn');
-        chars.textContent = `${viewSource} · ${message.length.toLocaleString()} characters`;
+        chars.textContent = `${viewSource} · ${message.length.toLocaleString()} chars`;
       }
 
       // The underline only. Not a re-render, and not a scroll: this runs on

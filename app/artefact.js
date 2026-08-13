@@ -44,7 +44,7 @@
 // per-screen decision about weight, and it is the screen's to make.
 
 import { fileName } from './words.js';
-import { fitFontSize } from './art.js';
+import { fitFontSize, stillBox } from './art.js';
 import { baseLineHeight } from '../src/sizing.js';
 import { advanceCssFor } from '../src/constants.js';
 
@@ -122,7 +122,13 @@ export function artefact({ root, bottomBar, stage, say, current, signal } = {}) 
     const advance = measured > 0.1 && measured < 2 ? measured : advanceCssFor(geom.codec);
     const lh = baseLineHeight(geom.codec, advance);
 
-    let fontSize = fitFontSize(geom, stage.clientWidth, stage.clientHeight, advance) * 2;
+    // From the STILL's box, not the stage's. Corrected 2026-08-13, when a still
+    // began stepping back 16px inside a hairline (STILL_INSET_PX in art.js).
+    // Fitting to the raw stage made this ~2.13x the on-screen size rather than
+    // the 2x promised above. Harmless for the raster, which is self-consistent,
+    // but it left two measurements of the art box disagreeing.
+    const box = stillBox(stage.clientWidth, stage.clientHeight);
+    let fontSize = fitFontSize(geom, box.width, box.height, advance) * 2;
     const w = () => Math.ceil(geom.cols * fontSize * advance);
     const h = () => Math.ceil(geom.rows * fontSize * lh);
     while ((w() > PNG_MAX_PX || h() > PNG_MAX_PX) && fontSize > 1) fontSize *= 0.9;
